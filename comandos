@@ -1,0 +1,49 @@
+- Abrir GS
+$FLAIR_ROOT/flair-install/bin/tools/core2-64/launch_flairgcs.sh
+
+- Control USB
+${FLAIR_ROOT}/flair-install/bin/tools/core2-64/dualshock3_usb.sh <ip_dron>
+$FLAIR_ROOT/flair-install/bin/tools/core2-64/dualshock3_local_usb.sh
+
+- Control BT
+sudo -E ${FLAIR_ROOT}/flair-install/bin/tools/core2-64/dualshock3_bt.sh <ip_dron>
+sudo -E $FLAIR_ROOT/flair-install/bin/tools/core2-64/dualshock3_local_bt.sh
+
+
+- Simulador
+cd $FLAIR_ROOT/flair-install/bin/demos/core2-64/<proyecto>
+./simulator_x4.sh
+
+cd $FLAIR_ROOT/flair-install/bin/demos/core2-64/<proyecto>
+./x4.sh
+
+
+
+- SSH
+ssh root@192.168.147.33
+o tambien 
+ssh timmy
+
+- Cerrar comunicacion
+sync
+halt
+
+
+- Enviar programas
+scp <archivo> root@192.168.147.33:bin/arm
+scp <archivo> timmy:bin/arm
+
+
+- Recibir
+scp root@192.168.147.33:~/bin/arm/proyecto22_ardrone2.xml /home/parrot/Documentos
+scp timmy:~/bin/arm/proyecto22_ardrone2.xml /home/parrot/Documentos
+
+
+- Clonar
+cd $FLAIR_ROOT/my_src
+$FLAIR_ROOT/flair-src/scripts/clone_demo.sh $FLAIR_ROOT/flair-src/demos/CircleFollower/ MyApp
+
+- Compilar
+$FLAIR_ROOT/flair-src/scripts/cmake_codelite_outofsource.sh $FLAIR_ROOT/<path_to_my_project>
+cd build
+make install
