@@ -355,7 +355,9 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     uavVrpn->GetSpeed(uav_vel);
     uavVrpn->GetQuaternion(uav_quat);
 
-    Thread::Info("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
+    //Thread::Info("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
+    Printf("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
+    Printf("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
     //Thread::Info("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
 
     const AhrsData *currentOrientation = GetDefaultOrientation();
@@ -369,10 +371,15 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     double az = yd->Value(); // 0.001
     double b = zd->Value(); // 0.01
 
-    Vector3Df xid = Vector3Df(a*sin(b*tactual),a*cos(b*tactual),az*sin(b*tactual)-2);
-    Vector3Df xidp = Vector3Df(a*cos(b*tactual),-a*sin(b*tactual),az*cos(b*tactual));
-    Vector3Df xidpp = Vector3Df(-a*sin(b*tactual),-a*cos(b*tactual),-az*sin(b*tactual));
-    Vector3Df xidppp = Vector3Df(-a*cos(b*tactual),a*sin(b*tactual),-az*cos(b*tactual));
+    // Vector3Df xid = Vector3Df(a*sin(b*tactual),a*cos(b*tactual),az*sin(b*tactual)-2);
+    // Vector3Df xidp = Vector3Df(a*cos(b*tactual),-a*sin(b*tactual),az*cos(b*tactual));
+    // Vector3Df xidpp = Vector3Df(-a*sin(b*tactual),-a*cos(b*tactual),-az*sin(b*tactual));
+    // Vector3Df xidppp = Vector3Df(-a*cos(b*tactual),a*sin(b*tactual),-az*cos(b*tactual));
+
+    Vector3Df xid = Vector3Df(xd->Value(),yd->Value(),zd->Value());
+    Vector3Df xidp = Vector3Df(0,0,0);
+    Vector3Df xidpp = Vector3Df(0,0,0);
+    Vector3Df xidppp = Vector3Df(0,0,0);
 
     printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
     
@@ -382,10 +389,12 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
-    torques.roll = u_sliding_pos->Output(0);
-    torques.pitch = u_sliding_pos->Output(1);
-    torques.yaw = u_sliding_pos->Output(2);
-    thrust = u_sliding_pos->Output(3);
+    if(xdpp->Value() == 0){
+        torques.roll = u_sliding_pos->Output(0);
+        torques.pitch = u_sliding_pos->Output(1);
+        torques.yaw = u_sliding_pos->Output(2);
+        thrust = u_sliding_pos->Output(3);
+    }
     //thrust = ComputeDefaultThrust();
     
 

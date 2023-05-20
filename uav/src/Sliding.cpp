@@ -15,7 +15,7 @@
 //
 /*********************************************************************/
 #include "Sliding.h"
-#include "Rk4.h"
+#include "NMethods.h"
 #include <Matrix.h>
 #include <Vector3D.h>
 #include <Quaternion.h>

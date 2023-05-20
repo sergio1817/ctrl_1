@@ -14,7 +14,9 @@
 #define SLIDING_POS_H
 
 #include <Object.h>
+#include "NMethods.h"
 #include <ControlLaw.h>
+#include <Eigen/Dense>
 #include <Vector3D.h>
 
 namespace flair {
@@ -73,10 +75,12 @@ public:
 
     
     
-    float t0;
+    flair::core::Time t0;
 
 private:
     flair::core::Matrix *state;
+    Levant_diff levant;
+    float ud, u1p, x, u1;
 
     float sech(float value);
 
@@ -88,7 +92,11 @@ private:
     
     bool first_update;
     
-    flair::core::Vector3Df sgnp, sgn, sgnp2, sgn2;
+    Eigen::Vector3d sgnpos_p, sgnpos;
+
+    Eigen::Matrix3d I = Eigen::Matrix3d::Identity(3,3);
+
+    flair::core::Vector3Df sgnori_p, sgnori;
     
     
 };

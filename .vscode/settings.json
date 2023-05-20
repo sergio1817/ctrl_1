@@ -74,7 +74,9 @@
         "typeinfo": "cpp",
         "valarray": "cpp",
         "variant": "cpp",
-        "queue": "cpp"
+        "queue": "cpp",
+        "core": "cpp",
+        "dense": "cpp"
     },
     "codegpt.apiKey": "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"
 }

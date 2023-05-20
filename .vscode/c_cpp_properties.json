@@ -24,7 +24,8 @@
             "name": "Fl-Air",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${FLAIR_ROOT}/flair-install/**"
+                "${FLAIR_ROOT}/flair-install/**",
+                "${EIGEN3_INCLUDE_DIR}/**"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

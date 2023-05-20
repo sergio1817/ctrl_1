@@ -1,6 +1,13 @@
 PROJECT(ctrl1)
 cmake_minimum_required(VERSION 2.8)
 
+# Eigen
+list(APPEND CMAKE_MODULE_PATH "~/src/eigen-3.4.0/cmake")
+SET( EIGEN3_INCLUDE_DIR "$ENV{EIGEN3_INCLUDE_DIR}" )
+INCLUDE_DIRECTORIES ( "${EIGEN3_INCLUDE_DIR}" )
+find_package(Eigen3 REQUIRED)
+link_directories(${Eigen_INCLUDE_DIRS})
+
 SET(FLAIR_USE_FILTER TRUE)
 SET(FLAIR_USE_SENSOR_ACTUATOR TRUE)
 SET(FLAIR_USE_META TRUE)
@@ -19,7 +26,7 @@ SET(SRC_FILES
 	src/ctrl1.cpp
 	src/Sliding.cpp
 	src/Sliding_pos.cpp
-	src/Rk4.cpp
+	src/NMethods.cpp
 	#src/MetaJR3.cpp
 	src/TargetJR3.cpp
 	src/TargetEthJR3.cpp

@@ -15,9 +15,10 @@
 //
 /*********************************************************************/
 #include "Sliding_pos.h"
-#include "Rk4.h"
+#include "NMethods.h"
 #include <Matrix.h>
 #include <Vector3D.h>
+#include <Eigen/Dense>
 #include <Quaternion.h>
 #include <Layout.h>
 #include <LayoutPosition.h>
@@ -26,6 +27,7 @@
 #include <DataPlot1D.h>
 #include <cmath>
 #include <Euler.h>
+#include <iostream>
 
 using std::string;
 using namespace flair::core;
@@ -58,10 +60,10 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     p = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "p:", 0, 50000, 1, 3);
     alpha = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "alpha:", 0, 50000, 0.5, 3);
     k = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "k:", 0, 50000, 0.5, 3);
-    Kd = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "Kd:", 0, 50000, 0.5, 3);
+    Kd = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "Kd:", -5000, 50000, 0.5, 3);
     gammap = new DoubleSpinBox(reglages_groupbox->NewRow(), "gamma_p:", -500, 500, 0.0001, 12);
     alphap = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "alpha_p:", 0, 50000, 0.5, 3);
-    Kp = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "Kp:", 0, 50000, 0.5, 3);
+    Kp = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "Kp:", -5000, 50000, 0.5, 3);
     sat_r = new DoubleSpinBox(reglages_groupbox->NewRow(), "sat roll:", 0, 1, 0.1);
     sat_p = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "sat pitch:", 0, 1, 0.1);
     sat_y = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "sat yaw:", 0, 1, 0.1);
@@ -76,13 +78,19 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     //GroupBox *c_fisicas = new GroupBox(position->NewRow(), "Constantes Fisicas");
     
     t0 = double(GetTime())/1000000000;
-    
-    sgnp = Vector3Df(0,0,0);
-    sgn = Vector3Df(0,0,0);
 
-    sgnp2 = Vector3Df(0,0,0);
-    sgn2 = Vector3Df(0,0,0);
+    levant = Levant_diff("tanh", 8, 6, 3000);
+
+    sgnpos_p << 0,0,0;
+    sgnpos << 0,0,0;
+
+    sgnori_p = Vector3Df(0,0,0);
+    sgnori = Vector3Df(0,0,0);
     
+    u1 = 0;
+    u1p = 0;
+    ud = 0;
+    x = 0;
     
 }
 
@@ -92,11 +100,25 @@ void Sliding_pos::Reset(void) {
     first_update = true;
     t0 = 0;
     t0 = double(GetTime())/1000000000;
-    sgnp = Vector3Df(0,0,0);
-    sgn = Vector3Df(0,0,0);
+    sgnori_p = Vector3Df(0,0,0);
+    sgnori = Vector3Df(0,0,0);
 
-    sgnp2 = Vector3Df(0,0,0);
-    sgn2 = Vector3Df(0,0,0);
+    levant.Reset();
+
+    // sgnpos2 = Vector3Df(0,0,0);
+    // sgn2 = Vector3Df(0,0,0);
+
+    // sgnpos << 0,0,0;
+    // sgn << 0,0,0;
+
+    sgnpos_p << 0,0,0;
+    sgnpos << 0,0,0;
+
+    u1 = 0;
+    u1p = 0;
+    ud = 0;
+    x = 0;
+
 //    pimpl_->i = 0;
 //    pimpl_->first_update = true;
 }
@@ -227,10 +249,12 @@ void Sliding_pos::UseDefaultPlot7(const LayoutPosition *position) {
 
 
 void Sliding_pos::UpdateFrom(const io_data *data) {
-    float tactual=double(GetTime())/1000000000-t0;
+    float tactual=double(data->DataTime())/1000000000-t0;
+    Printf("tactual: %f\n",tactual);
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
     Vector3Df Qe3 = Vector3Df(0,0,1);
-    Vector3Df ez = Vector3Df(0,0,1);
+    //Vector3Df ez = Vector3Df(0,0,-1);
+    Eigen::Vector3d ez(0,0,1);
     
     if (T->Value() == 0) {
         delta_t = (float)(data->DataDeltaTime()) / 1000000000.;
@@ -242,7 +266,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         delta_t = 0;
         first_update = false;
     }
-    
+
     const Matrix* input = dynamic_cast<const Matrix*>(data);
   
     if (!input) {
@@ -252,101 +276,130 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
 
     input->GetMutex();
-    
-    Vector3Df xie = Vector3Df(input->ValueNoMutex(0, 0),input->ValueNoMutex(1, 0),input->ValueNoMutex(2, 0));
-    Vector3Df xiep = Vector3Df(input->ValueNoMutex(0, 1),input->ValueNoMutex(1, 1),input->ValueNoMutex(2, 1));
-
-    Vector3Df xid = Vector3Df(input->ValueNoMutex(0, 2),input->ValueNoMutex(1, 2),input->ValueNoMutex(2, 2));
-    Vector3Df xidpp = Vector3Df(input->ValueNoMutex(0, 4),input->ValueNoMutex(1, 4),input->ValueNoMutex(2, 4));
-    Vector3Df xidppp = Vector3Df(input->ValueNoMutex(0, 5),input->ValueNoMutex(1, 5),input->ValueNoMutex(2, 5));
 
     Vector3Df w = Vector3Df(input->ValueNoMutex(0, 6),input->ValueNoMutex(2, 6),input->ValueNoMutex(2, 6));
+
+    Eigen::Vector3d xie(input->ValueNoMutex(0, 0),input->ValueNoMutex(1, 0),input->ValueNoMutex(2, 0));
+    Eigen::Vector3d xiep(input->ValueNoMutex(0, 1),input->ValueNoMutex(1, 1),input->ValueNoMutex(2, 1));
+
+    Eigen::Vector3d xid(input->ValueNoMutex(0, 2),input->ValueNoMutex(1, 2),input->ValueNoMutex(2, 2));
+    Eigen::Vector3d xidpp(input->ValueNoMutex(0, 4),input->ValueNoMutex(1, 4),input->ValueNoMutex(2, 4));
+    Eigen::Vector3d xidppp(input->ValueNoMutex(0, 5),input->ValueNoMutex(1, 5),input->ValueNoMutex(2, 5));
+
+    //Eigen::Vector3d w(input->ValueNoMutex(0, 6),input->ValueNoMutex(2, 6),input->ValueNoMutex(2, 6));
 
     Quaternion q = Quaternion(input->ValueNoMutex(0, 7),input->ValueNoMutex(1, 7),input->ValueNoMutex(2, 7),input->ValueNoMutex(3, 7));
     
     input->ReleaseMutex();
 
-    printf("xie = %f %f %f\n", xie.x, xie.y, xie.z);
-    printf("xiep = %f %f %f\n", xiep.x, xiep.y, xiep.z);
-    printf("xid = %f %f %f\n", xid.x, xid.y, xid.z);
-    printf("xidpp = %f %f %f\n", xidpp.x, xidpp.y, xidpp.z);
-    printf("xidppp = %f %f %f\n", xidppp.x, xidppp.y, xidppp.z);
-    printf("w = %f %f %f\n", w.x, w.y, w.z);
-    printf("q = %f %f %f %f\n", q.q0, q.q1, q.q2, q.q3);
+    Eigen::Vector3d nup = xiep + alphap->Value()*xie;
 
-    Vector3Df nup = xiep + alphap->Value()*xie;
+    std::cout << "xiep = " << xiep << std::endl;
+    std::cout << "xie = " << xie << std::endl;
 
-    sgnp2.x = tanh(nup.x);
-    sgnp2.y = tanh(nup.y);
-    sgnp2.z = tanh(nup.z);
+    std::cout << "nup = " << nup << std::endl;
 
-    sgn2.x = rk4(function1d, sgn2.x, sgnp2.x, delta_t);
-    sgn2.y = rk4(function1d, sgn2.y, sgnp2.y, delta_t);
-    sgn2.z = rk4(function1d, sgn2.z, sgnp2.z, delta_t);
+    // sgnpos_p = nup.array().tanh();
+    // sgnpos = rk4_vec(sgnpos, sgnpos_p, delta_t);
 
-    Vector3Df u = Vector3Df(0,0,0);
-    // u.x = -(Kp->Value() + m->Value()*alphap->Value()) * xiep.x - (alphap->Value()*Kp->Value()) * xie.x - (Kp->Value()*gammap->Value()) * sgn2.x -
-    //                     (m->Value()*gammap->Value()) * sgnp2.x - m->Value()*g->Value()*ez.x + m->Value()*xidpp.x;
+    sgnpos_p(0) = tanh(nup(0));
+    sgnpos_p(1) = tanh(nup(1));
+    sgnpos_p(2) = tanh(nup(2));
 
-    // u.y = -(Kp->Value() + m->Value()*alphap->Value()) * xiep.y - (alphap->Value()*Kp->Value()) * xie.y - (Kp->Value()*gammap->Value()) * sgn2.y -
-    //                     (m->Value()*gammap->Value()) * sgnp2.y - m->Value()*g->Value()*ez.y + m->Value()*xidpp.y;
+    std::cout << "sgnpos_p = " << sgnpos_p << std::endl;
 
-    // u.z = -(Kp->Value() + m->Value()*alphap->Value()) * xiep.z - (alphap->Value()*Kp->Value()) * xie.z - (Kp->Value()*gammap->Value()) * sgn2.z -
-    //                     (m->Value()*gammap->Value()) * sgnp2.z - m->Value()*g->Value()*ez.z + m->Value()*xidpp.z;
+    sgnpos(0) = rk4(function1d, sgnpos(0), sgnpos_p(0), delta_t);
+    sgnpos(1) = rk4(function1d, sgnpos(1), sgnpos_p(1), delta_t);
+    sgnpos(2) = rk4(function1d, sgnpos(2), sgnpos_p(2), delta_t);
+
+    std::cout << "sgnpos = " << sgnpos << std::endl;
+
+    Eigen::Vector3d nurp = nup + gammap->Value()*sgnpos;
+
+    std::cout << "nurp = " << nurp << std::endl;
+
+    Eigen::Vector3d xirpp = xidpp - alphap->Value()*xiep - gammap->Value()*sgnpos_p;
+
+    Eigen::Vector3d Kpv(Kp->Value(), Kp->Value(), Kp->Value());
+
+    Eigen::Matrix3d Kpm = Kpv.asDiagonal();
+
     
-    u.x = -(Kp->Value()) * (nup.x + gammap->Value()*sgn2.x);
-    u.y = -(Kp->Value()) * (nup.y + gammap->Value()*sgn2.y);
-    u.z = -(Kp->Value()) * (nup.z + gammap->Value()*sgn2.z);
 
-    //u = -u;
+    Eigen::Vector3d u = -Kpm*nurp - m->Value()*g->Value()*ez + m->Value()*xirpp; //- m->Value()*g->Value()*ez + m->Value()*xirpp
 
-    printf("u = %f %f %f\n", u.x, u.y, u.z);
+    std::cout << "u = " << u << std::endl;
 
-    Trs = u.GetNorm();
+
+    Trs = u.norm();
 
     printf("Trs = %f\n", Trs);
 
     Qe3.Rotate(q);
+    Eigen::Vector3d Qe3_(Qe3.x, Qe3.y, Qe3.z);
     printf("Qe3 = %f %f %f\n", Qe3.x, Qe3.y, Qe3.z);
-    Vector3Df up = Vector3Df(0,0,0);
-    // up.x = -(Kp->Value() + m->Value()*alphap->Value() + m->Value()*gammap->Value()*pow(sech(nup.x),2)) * (  g->Value()*ez.x - (Trs/m->Value())*Qe3.x-xidpp.x) - 
-    //         alphap->Value()*(Kp->Value()+m->Value()*gammap->Value()*pow(sech(nup.x),2))*xiep.x - Kp->Value()*gammap->Value()*sgnp2.x + m->Value()*xidppp.x;
+    //Vector3Df up = Vector3Df(0,0,0);
 
-    // up.y = -(Kp->Value() + m->Value()*alphap->Value() + m->Value()*gammap->Value()*pow(sech(nup.y),2)) * (  g->Value()*ez.y - (Trs/m->Value())*Qe3.y-xidpp.y) -
-    //         alphap->Value()*(Kp->Value()+m->Value()*gammap->Value()*pow(sech(nup.y),2))*xiep.y - Kp->Value()*gammap->Value()*sgnp2.y + m->Value()*xidppp.y;
+    Eigen::Vector3d Lambpv(pow(sech(nup(0)),2), pow(sech(nup(1)),2), pow(sech(nup(2)),2) );
+    Eigen::Matrix3d Lambp = Lambpv.asDiagonal();
 
-    // up.z = -(Kp->Value() + m->Value()*alphap->Value() + m->Value()*gammap->Value()*pow(sech(nup.z),2)) * (  g->Value()*ez.z - (Trs/m->Value())*Qe3.z-xidpp.z) -
-    //         alphap->Value()*(Kp->Value()+m->Value()*gammap->Value()*pow(sech(nup.z),2))*xiep.z - Kp->Value()*gammap->Value()*sgnp2.z + m->Value()*xidppp.z;
+    // Eigen::Vector3d vec(sin(tactual), sin(tactual), sin(tactual));
 
-    up.x = -Kp->Value() * ( g->Value()*ez.x - (Trs/m->Value())*Qe3.x - xidpp.x +  alphap->Value()*xiep.x + gammap->Value()*pow(sech(nup.x),2));
-    up.y = -Kp->Value() * ( g->Value()*ez.y - (Trs/m->Value())*Qe3.y - xidpp.y +  alphap->Value()*xiep.y + gammap->Value()*pow(sech(nup.y),2));
-    up.z = -Kp->Value() * ( g->Value()*ez.z - (Trs/m->Value())*Qe3.z - xidpp.z +  alphap->Value()*xiep.z + gammap->Value()*pow(sech(nup.z),2));
+    float f = gammap->Value()*sin(alphap->Value()*tactual);
+    float alpha2 = Kp->Value();
+    float lamb = Kd->Value();
 
-    //up = -up;
+    levant.setParam(alpha2, lamb);
+    
 
-    printf("up = %f %f %f\n", up.x, up.y, up.z);
-
-    Vector3Df un = u;
-    Vector3Df upn = up;
+    ud = levant.Compute(f,delta_t);
+    
+    
+    
+    
+    // ud = u1 - lamb*(sqrtf(std::abs(x-f)))*signth(x-f,p->Value());
 
     
-    un.Normalize();
-    upn.Normalize();
+    // u1p = -alpha2*signth(x-f,p->Value());
+    // x = rk4(function1d, x, ud, delta_t);
+    // u1 = rk4(function1d, u1, u1p, delta_t);
+    
 
-    printf("un = %f %f %f\n", un.x, un.y, un.z);
-    printf("upn = %f %f %f\n", upn.x, upn.y, upn.z);
-    printf("un_norm = %f\n", un.GetNorm());
-    printf("upn_norm = %f\n", upn.GetNorm());
+    //float d = Levants(sin(tactual),8,6,3000,delta_t);
+    //Printf("d = %f\n", ud);
+
+    // Eigen::Vector3d up = Levants_diff_vec(vec,8,6,3000,delta_t);
+    // std::cout << "up = " << up << std::endl;
+
+    Eigen::Vector3d up = -(Kpm + m->Value()*alphap->Value()*I + m->Value()*gammap->Value()*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3_ - xidpp) - 
+                        alphap->Value()*(Kpm+m->Value()*gammap->Value()*Lambp)*xiep - Kpm*gammap->Value()*sgnpos_p + m->Value()*xidppp;
+
+    std::cout << "up = " << up << std::endl;
+
+    //Eigen::Vector3d up = -Kpm * ( (g->Value()*ez - (Trs/m->Value())*Qe3_ - xidpp) + alphap->Value()*xiep + gammap->Value()*Lambpv);
+
+
+    //printf("up = %f %f %f\n", up.x, up.y, up.z);
+
+    // Vector3Df un = u;
+    // Vector3Df upn = up;
+
+    
+    Eigen::Vector3d un = u.normalized();
+    Eigen::Vector3d upn = up.normalized();
+
+    // printf("un = %f %f %f\n", un(0), un(1), un(2));
+    // printf("upn = %f %f %f\n", upn(0), upn(1), upn(2));
 
     Quaternion qd = Quaternion(0,0,0,0);
-    qd.q0 = (0.5)*sqrt(-2*un.z+2);
-    qd.q1 = un.y/sqrt(-2*un.z+2);
-    qd.q2 = -un.x/sqrt(-2*un.z+2);
+    qd.q0 = (0.5)*sqrt(-2*un(2)+2);
+    qd.q1 = un(1)/sqrt(-2*un(2)+2);
+    qd.q2 = -un(0)/sqrt(-2*un(2)+2);
 
     Quaternion qdp = Quaternion(0,0,0,0);
-    qdp.q0 = -(0.5)*(upn.z/sqrt(-2*un.z+2));
-    qdp.q1 = (upn.y/sqrt(-2*un.y+2)) + ((un.y*upn.z)/pow(-2*un.z+2,1.5));
-    qdp.q2 = -(upn.x/sqrt(-2*un.z+2)) - ((un.x*upn.z)/pow(-2*un.z+2,1.5));
+    qdp.q0 = -(0.5)*(upn(2)/sqrt(-2*un(2)+2));
+    qdp.q1 = (upn(1)/sqrt(-2*un(2)+2)) + ((un(1)*upn(2))/pow(-2*un(2)+2,1.5));
+    qdp.q2 = -(upn(0)/sqrt(-2*un(2)+2)) - ((un(0)*upn(2))/pow(-2*un(2)+2,1.5));
 
     Euler eta = qd.ToEuler();
 
@@ -358,9 +411,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Vector3Df wd = Vector3Df(0,0,0);
 
-    wd.x = upn.y - ( (un.y*upn.z)/(1-un.z) );
-    wd.y = -upn.x + ( (un.x*upn.z)/(1-un.z) );
-    wd.z = (un.y*upn.x - un.x*upn.y)/(1-un.z);
+    wd.x = upn(1) - ( (un(1)*upn(2))/(1-un(2)) );
+    wd.y = -upn(0) + ( (un(0)*upn(2))/(1-un(2)) );
+    wd.z = (un(1)*upn(0) - un(0)*upn(1))/(1-un(2));
 
     Vector3Df we = w - wd;
 
@@ -369,21 +422,23 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     
     Vector3Df nu = we + alpha->Value()*QdTqe3;
     
-    Vector3Df nu_t0 = 0.01*Vector3Df(0,0,1);
+    Vector3Df nu_t0 = 0.00*Vector3Df(0,0,1);
     
     Vector3Df nud = nu_t0*exp(-k->Value()*(abs(tactual)));
     
     Vector3Df nuq = nu-nud;
+
+    Printf("nuq = %f %f %f\n", nuq.x, nuq.y, nuq.z);
     
-    sgnp.x = signth(nuq.x,p->Value());
-    sgnp.y = signth(nuq.y,p->Value());
-    sgnp.z = signth(nuq.z,p->Value());
+    sgnori_p.x = signth(nuq.x,p->Value());
+    sgnori_p.y = signth(nuq.y,p->Value());
+    sgnori_p.z = signth(nuq.z,p->Value());
     
-    sgn.x = rk4(function1d, sgn.x, sgnp.x, delta_t);
-    sgn.y = rk4(function1d, sgn.y, sgnp.y, delta_t);
-    sgn.z = rk4(function1d, sgn.z, sgnp.z, delta_t);
+    sgnori.x = rk4(function1d, sgnori.x, sgnori_p.x, delta_t);
+    sgnori.y = rk4(function1d, sgnori.y, sgnori_p.y, delta_t);
+    sgnori.z = rk4(function1d, sgnori.z, sgnori_p.z, delta_t);
     
-    Vector3Df nur = nuq + gamma->Value()*sgn;
+    Vector3Df nur = nuq + gamma->Value()*sgnori;
     
     Vector3Df tau = Kd->Value()*nur;
     
@@ -393,21 +448,21 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     
     tau_yaw = (float)tau.z/km->Value();
     
-    Tr = sqrtf(Trs/km_z->Value());
+    Tr = -sqrtf(Trs/km_z->Value());
     
     tau_roll = Sat(tau_roll,sat_r->Value());
     tau_pitch = Sat(tau_pitch,sat_p->Value());
     tau_yaw = Sat(tau_yaw,sat_y->Value());
-    Tr = -Sat(Tr,sat_t->Value());
+    Tr = Sat(Tr,sat_t->Value());
     
     state->GetMutex();
     state->SetValueNoMutex(0, 0, tau_roll);
     state->SetValueNoMutex(1, 0, tau_pitch);
     state->SetValueNoMutex(2, 0, tau_yaw);
     state->SetValueNoMutex(3, 0, Tr);
-    state->SetValueNoMutex(4, 0, eta.roll);
-    state->SetValueNoMutex(5, 0, eta.pitch);
-    state->SetValueNoMutex(6, 0, eta.yaw);
+    state->SetValueNoMutex(4, 0, f);
+    state->SetValueNoMutex(5, 0, ud);
+    state->SetValueNoMutex(6, 0, cos(tactual));
     state->ReleaseMutex();
 
 
