@@ -13,49 +13,14 @@ float rk4(float(*fPtr)(float), const float iC, const float iCdt, const float dt)
 }
 
 
-Eigen::Vector3d rk4_vec(const Eigen::Vector3d iC, const Eigen::Vector3d iCdt, const float dt){
-    Eigen::Vector3d integral(0,0,0);
+Eigen::Vector3f rk4_vec(const Eigen::Vector3f iC, const Eigen::Vector3f iCdt, const float dt){
+    Eigen::Vector3f integral(0,0,0);
     integral(0) = rk4(function1d, iC(0), iCdt(0), dt);
     integral(1) = rk4(function1d, iC(1), iCdt(1), dt);
     integral(2) = rk4(function1d, iC(2), iCdt(2), dt);
     return integral;
 }
 
-void Levants_diff(float &u, float &u1p, const float u1, const float x, const float f, const float alpha, const float lamb, const float p){
-    u = u1 - lamb*(pow(abs(x-f),0.5))*signth(x-f,p);
-    u1p = -alpha*signth(x-f,p);
-}
-
-
-// float Levants(const float f, const float alpha, const float lamb, const float p, const float dt){
-//     float u, u1p;
-//     float x = rk4(function1d, x, u, dt);
-//     float u1 = rk4(function1d, u1, u1p, dt);
-//     Levants_diff(u, u1p, u1, x, f, alpha, lamb, p);
-
-//     return u;
-// }
-
-Eigen::Vector3d Levants_diff_vec(const Eigen::Vector3d f, const float alpha, const float lamb, const float p, const float dt){
-    Eigen::Vector3d u(0,0,0), u1(0,0,0), u1p(0,0,0), x(0,0,0);
-
-    u1 = rk4_vec(u1, u1p, dt);
-
-    x = rk4_vec(x, u, dt);
-
-    u(0) = u1(0) - lamb*(pow(abs(x(0)-f(0)),0.5))*signth(x(0)-f(0),p);
-    u(1) = u1(1) - lamb*(pow(abs(x(1)-f(1)),0.5))*signth(x(1)-f(1),p);
-    u(2) = u1(2) - lamb*(pow(abs(x(2)-f(2)),0.5))*signth(x(2)-f(2),p);
-
-    u1p(0) = -alpha*signth(x(0)-f(0),p);
-    u1p(1) = -alpha*signth(x(1)-f(1),p);
-    u1p(2) = -alpha*signth(x(2)-f(2),p);
-
-    
-
-    return u;
-
-}
 
 /*! \fn function1d.
  */
@@ -137,6 +102,20 @@ void Levant_diff::Compute(float &_u, const float f, const float dt){
     u1p = -alpha*sign(x-f);
     x = rk4(function1d, x, _u, dt);
     u1 = rk4(function1d, u1, u1p, dt);
+}
+
+Eigen::Vector3f Levant_diff::Compute(const Eigen::Vector3f f, const float dt){
+    u_vec(0) = u1_vec(0) - lamb*(sqrtf(fabs(x_vec(0)-f(0))))*sign_(x_vec(0)-f(0));
+    u_vec(1) = u1_vec(1) - lamb*(sqrtf(fabs(x_vec(1)-f(1))))*sign_(x_vec(1)-f(1));
+    u_vec(2) = u1_vec(2) - lamb*(sqrtf(fabs(x_vec(2)-f(2))))*sign_(x_vec(2)-f(2));
+
+    u1p_vec(0) = -alpha*sign(x_vec(0)-f(0));
+    u1p_vec(1) = -alpha*sign(x_vec(1)-f(1));
+    u1p_vec(2) = -alpha*sign(x_vec(2)-f(2));
+
+    x_vec = rk4_vec(x_vec, u_vec, dt);
+    u1_vec = rk4_vec(u1_vec, u1p_vec, dt);
+    return u_vec;
 }
 
 float Levant_diff::sign_(const float a){

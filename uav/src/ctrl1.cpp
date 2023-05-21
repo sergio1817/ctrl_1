@@ -129,6 +129,9 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     u_sliding_pos->UseDefaultPlot3(graphLawTab3->At(0, 2));
     u_sliding_pos->UseDefaultPlot4(graphLawTab3->At(1, 2));
 
+    u_sliding_pos->UseDefaultPlot8(graphLawTab3->At(1, 0));
+    u_sliding_pos->UseDefaultPlot9(graphLawTab3->At(1, 1));
+
     u_sliding_pos->UseDefaultPlot5(positiongTab->At(0, 0));
     u_sliding_pos->UseDefaultPlot6(positiongTab->At(0, 1));
     u_sliding_pos->UseDefaultPlot7(positiongTab->At(0, 2));

@@ -33,36 +33,7 @@ float rk4(float(*fPtr)(float), const float iC, const float iCdt, const float dt)
   * \param iCdt Derivative of the integral of the function
   * \param dt   Time step
   */
-Eigen::Vector3d rk4_vec(const Eigen::Vector3d iC, const Eigen::Vector3d iCdt, const float dt);
-
-
-/*!
-  * \brief Levant's differentiator method.
-  *
-  * Compute the derivative of a function using the Levant's differentiator method.
-  *
-  * \param f        Function to differentiate
-  * \param alpha    Parameter of the Levant's differentiator
-  * \param lamb     Parameter of the Levant's differentiator
-  * \param p        Parameter for the sign (tanh) function 
-  * \param dt       Time step
-  */
-void Levants_diff(float &u, float &u1p, const float u1, const float x, const float f, const float alpha, const float lamb, const float p);
-
-float Levants(const float f, const float alpha, const float lamb, const float p, const float dt);
-/*!
-    * \brief Levant's differentiator method.
-    *
-    * Compute the derivative of a function using the Levant's differentiator method for a Eigen::Vector3d object.
-    * 
-    * \param f        Function to differentiate
-    * \param alpha    Parameter of the Levant's differentiator
-    * \param lamb     Parameter of the Levant's differentiator
-    * \param p        Parameter for the sign (tanh) function
-    * \param dt       Time step
-    *
-*/
-Eigen::Vector3d Levants_diff_vec(const Eigen::Vector3d f, const float alpha, const float lamb, const float p, const float dt);
+Eigen::Vector3f rk4_vec(const Eigen::Vector3f iC, const Eigen::Vector3f iCdt, const float dt);
 
 
 /*! \fn function1d.
@@ -89,10 +60,14 @@ public:
     float Compute(const float f, const float dt);
     void Compute(float &u, const float f, const float dt);
 
+    Eigen::Vector3f Compute(const Eigen::Vector3f f, const float dt);
+
 private:
     std::string mode;
     float alpha, lamb, p;
     float u, u1, u1p, x;
+
+    Eigen::Vector3f u_vec, u1_vec, u1p_vec, x_vec;
 
     float sign_(const float a);
 

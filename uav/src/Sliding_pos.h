@@ -72,6 +72,8 @@ public:
     void UseDefaultPlot5(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot6(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot7(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot8(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot9(const flair::gui::LayoutPosition *position);
 
     
     
@@ -84,7 +86,11 @@ private:
 
     float sech(float value);
 
-    flair::gui::DoubleSpinBox *T, *gamma, *gammap, *alpha, *alphap, *k, *Kd, *Kp, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p, *km_z;
+    flair::gui::DoubleSpinBox *T, *gamma, *k, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p, *km_z;
+    flair::gui::DoubleSpinBox *gamma_roll, *gamma_pitch, *gamma_yaw, *gamma_x, *gamma_y, *gamma_z;
+    flair::gui::DoubleSpinBox *alpha_roll, *alpha_pitch, *alpha_yaw, *alpha_x, *alpha_y, *alpha_z;
+    flair::gui::DoubleSpinBox *Kd_roll, *Kd_pitch, *Kd_yaw, *Kd_x, *Kd_y, *Kd_z;
+    flair::gui::DoubleSpinBox *Kp_roll, *Kp_pitch, *Kp_yaw, *Kp_x, *Kp_y, *Kp_z;
     
     float Sat(float value, float borne);
     
@@ -92,11 +98,11 @@ private:
     
     bool first_update;
     
-    Eigen::Vector3d sgnpos_p, sgnpos;
+    Eigen::Vector3f sgnpos_p, sgnpos, sgnori_p, sgnori;
 
-    Eigen::Matrix3d I = Eigen::Matrix3d::Identity(3,3);
+    Eigen::Matrix3f I = Eigen::Matrix3f::Identity(3,3);
 
-    flair::core::Vector3Df sgnori_p, sgnori;
+    //flair::core::Vector3ff sgnori_p, sgnori;
     
     
 };
