@@ -99,11 +99,11 @@ void TargetEthJR3::AcquireSensorData(core::Matrix &axis) {
     string line;
     std::stringstream S(dataFrameBufferString); 
     unsigned int i = 0;
+    flair::core::Time t0 = GetTime();
     axis.GetMutex();
     // for (unsigned int i = 0; i < axisNumber; i++) {
     //     axis.SetValueNoMutex(i, 0, );
     // }
-
     while (getline(S, line, ';')){
         axis.SetValueNoMutex(i, 0, std::stof(line));
         i++;
@@ -111,8 +111,8 @@ void TargetEthJR3::AcquireSensorData(core::Matrix &axis) {
             break;
         }
     }
-    
     axis.ReleaseMutex();
+    dt_read = GetTime() - t0;
 }
 
 

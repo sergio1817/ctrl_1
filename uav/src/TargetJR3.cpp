@@ -24,6 +24,8 @@
 #include <DataPlot1D.h>
 #include <SpinBox.h>
 #include <PushButton.h>
+#include <GroupBox.h>
+#include <Label.h>
 
 #include <cstring>
 #include <string>
@@ -41,9 +43,10 @@ TargetJR3::TargetJR3(string name,uint8_t priority) : Thread(getFrameworkManager(
     setup_tab=new Tab(tab,"Reglages");
 
     SetPeriodMS(50);
-
-    T = new SpinBox(setup_tab->NewRow(), "Sampling time", " us", 0, 100000, 1,0);
-    setTs = new PushButton(setup_tab->LastRowLastCol(),"Set Ts");
+    GroupBox *setup = new GroupBox(setup_tab->NewRow(), "setup");
+    T = new SpinBox(setup->NewRow(), "Sampling time", " us", 0, 100000, 1,0);
+    setTs = new PushButton(setup->LastRowLastCol(),"Set Ts");
+    l2 = new Label(setup->LastRowLastCol(), "Latencia");
 
 }
 
@@ -144,6 +147,7 @@ void TargetJR3::Run() {
         // Thread::Info("Debug: data frame is ready\n");
 
         AcquireSensorData(*axis);
+        l2->SetText("Latecia: %.3f ms",(float)dt_read/1000000);
         // send the data
         axis->SetDataTime(GetTime());
         ProcessUpdate(axis);

@@ -37,6 +37,7 @@ class TabWidget;
 class DataPlot1D;
 class PushButton;
 class SpinBox;
+class Label;
 }
 }
 
@@ -66,9 +67,11 @@ public:
   void UpdateFrom(const core::io_data *data){}; // TODO
   void DrawUserInterface();
   gui::Tab *GetTab(void) const;
-  gui::TabWidget *tab;
+  flair::gui::TabWidget *tab;
   flair::gui::PushButton *setTs;
-  gui::SpinBox *T;
+  flair::gui::SpinBox *T;
+  flair::gui::Label *l2;
+
 
     float GetFx() const;
     float GetFy() const;
@@ -81,6 +84,8 @@ public:
     flair::core::Vector3Df GetMoment() const;
 
     core::Matrix *axis = nullptr;
+
+    flair::core::Time dt_read;
 
 protected:
   virtual bool ProcessMessage(core::Message *msg) = 0;
@@ -102,6 +107,7 @@ protected:
 
 private:
   void Run();
+  
   std::queue<core::Message *> changeStateQueue;
   flair::gui::Tab *main_tab;
   flair::gui::Tab *setup_tab;

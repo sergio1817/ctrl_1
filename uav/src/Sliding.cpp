@@ -196,7 +196,7 @@ void Sliding::UpdateFrom(const io_data *data) {
     
     Vector3Df nur = nuq + gamma->Value()*sgn;
     
-    Vector3Df tau = Kd->Value()*nur;
+    Vector3Df tau = -Kd->Value()*nur;
     
     Trs =  (m->Value()*(k1->Value()*zp + k2->Value()*ze + g->Value()))/(cos(currentAngles.pitch)*cos(currentAngles.roll));
     
@@ -208,10 +208,10 @@ void Sliding::UpdateFrom(const io_data *data) {
     
     Tr = (float)Trs/km->Value();
     
-    tau_roll = Sat(tau_roll,sat_r->Value());
-    tau_pitch = Sat(tau_pitch,sat_p->Value());
-    tau_yaw = Sat(tau_yaw,sat_y->Value());
-    Tr = Sat(Tr,sat_t->Value());
+    tau_roll = -Sat(tau_roll,sat_r->Value());
+    tau_pitch = -Sat(tau_pitch,sat_p->Value());
+    tau_yaw = -Sat(tau_yaw,sat_y->Value());
+    Tr = -Sat(Tr,sat_t->Value());
     
     state->GetMutex();
     state->SetValueNoMutex(0, 0, tau_roll);

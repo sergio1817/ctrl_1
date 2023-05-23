@@ -48,6 +48,8 @@ float sigmoide(const float a, const float d);
 
 float signth(const float a, const float p);
 
+Eigen::Vector3f signth(const Eigen::Vector3f a, const float p);
+
 
 
 class Levant_diff{

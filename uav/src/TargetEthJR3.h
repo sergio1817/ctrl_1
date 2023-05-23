@@ -46,7 +46,7 @@ namespace sensor {
 */
 class TargetEthJR3 : public TargetJR3 {
 public:
-  TargetEthJR3(std::string name, uint16_t port, uint8_t priority = 0);
+  TargetEthJR3(std::string name, uint16_t port, uint8_t priority = 80);
   ~TargetEthJR3();
   // void DrawUserInterface();
   std::string GetAxisName(unsigned int axisId) const;

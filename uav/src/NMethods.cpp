@@ -57,9 +57,16 @@ float sigmoide(const float a, const float d){
 }
 
 float signth(const float a, const float p){
-    return tanh(p*a);
+    return tanhf(p*a);
 }
 
+Eigen::Vector3f signth(const Eigen::Vector3f a, const float p){
+    Eigen::Vector3f salida;
+    salida(0) = tanhf(p*a(0));
+    salida(1) = tanhf(p*a(1));
+    salida(2) = tanhf(p*a(2));
+    return salida;
+}
 
 Levant_diff::Levant_diff(std::string _mode, const float _aplha, const float _lamb, const float _p): mode(_mode) {
     this->alpha = _aplha;
