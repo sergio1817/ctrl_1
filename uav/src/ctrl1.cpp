@@ -386,7 +386,7 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
 
     printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
     
-    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion);
+    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularSpeed,currentQuaternion);
     
     u_sliding_pos->Update(GetTime());
     

@@ -65,7 +65,7 @@ public:
     void UseDefaultPlot3(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot4(const flair::gui::LayoutPosition *position);
     
-    float t0;
+    flair::core::Time t0;
 
 private:
     flair::core::Matrix *state;

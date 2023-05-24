@@ -286,8 +286,6 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     float tactual=double(GetTime())/1000000000-t0;
     Printf("tactual: %f\n",tactual);
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
-    //Vector3ff Qe3 = Vector3ff(0,0,1);
-    //Vector3ff ez = Vector3ff(0,0,-1);
     Eigen::Vector3f ez(0,0,1);
     
     if (T->Value() == 0) {
@@ -333,7 +331,10 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f nup = xiep + alphap*xie;
 
-    sgnpos_p = signth(nup,p->Value());
+    std::cout << "xie = \n" << xie << std::endl;
+    std::cout << "xiep = \n" << xiep << std::endl;
+
+    sgnpos_p = signth(nup,1);
     sgnpos = rk4_vec(sgnpos, sgnpos_p, delta_t);
 
     // sgnpos_p(0) = tanh(nup(0));
@@ -378,7 +379,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     // printf("Qe3 = %f %f %f\n", Qe3.x, Qe3.y, Qe3.z);
     //Vector3ff up = Vector3ff(0,0,0);
     
-    Eigen::Vector3f Lambpv(powf(sech(nup(0)*p->Value()),2), powf(sech(nup(1)*p->Value()),2), powf(sech(nup(2)*p->Value()),2) );
+    Eigen::Vector3f Lambpv(powf(sech(nup(0)*1),2), powf(sech(nup(1)*1),2), powf(sech(nup(2)*1),2) );
     Eigen::Matrix3f Lambp = Lambpv.asDiagonal();
 
     // Eigen::Vector3f vec(sin(tactual), sin(tactual), sin(tactual));
@@ -392,9 +393,10 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     // ud = levant.Compute(f,delta_t);
     
+    Eigen::Vector3f up = levant.Compute(u,delta_t);
 
-    Eigen::Vector3f up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 
-                        -alphap*(Kpm+m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
+    // Eigen::Vector3f up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 
+    //                     -alphap*(Kpm+m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
 
     std::cout << "up = \n" << up << std::endl;
 
@@ -424,8 +426,8 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     // printf("qd: %f %f %f %f\n",qd.q0,qd.q1,qd.q2,qd.q3);
     
 
-    Eigen::Quaternionf qdc = qd.conjugate();
-    Eigen::Quaternionf qe = q*qdc;
+    //Eigen::Quaternionf qdc = qd.conjugate();
+    Eigen::Quaternionf qe = q*qd.conjugate();
 
     Eigen::Vector3f wd(upn(1) - ( (un(1)*upn(2))/(1-un(2)) ), 
                         -upn(0) + ( (un(0)*upn(2))/(1-un(2)) ), 
@@ -439,8 +441,13 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f we = w - wd;
 
-    Eigen::Quaternionf QdTqe = qdc*qe*qd;
-    Eigen::Vector3f QdTqe3(QdTqe.x(),QdTqe.y(),QdTqe.z());
+    //Eigen::Quaternionf QdTqe = qdc*qe*qd;
+
+    //std::cout << "QdTqe = \n" << QdTqe.coeffs() << std::endl;
+
+    //Eigen::Vector3f QdTqe3(QdTqe.x(),QdTqe.y(),QdTqe.z());
+
+    Eigen::Vector3f QdTqe3 = qd.toRotationMatrix().transpose()*qe.vec();
 
     Eigen::Vector3f alphao_v(alpha_roll->Value(), alpha_pitch->Value(), alpha_yaw->Value());
     Eigen::Matrix3f alphao = alphao_v.asDiagonal();
@@ -449,7 +456,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     
     Eigen::Vector3f nu = we + alphao*QdTqe3;
     
-    Eigen::Vector3f nu_t0 = 0*Eigen::Vector3f(1,1,1);
+    Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
     
     Eigen::Vector3f nud = nu_t0*exp(-k->Value()*(tactual));
     
