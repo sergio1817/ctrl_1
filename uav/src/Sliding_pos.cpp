@@ -288,6 +288,18 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
     Eigen::Vector3f ez(0,0,1);
     
+    Eigen::Vector3f alphap_v(alpha_x->Value(), alpha_y->Value(), alpha_z->Value());
+    Eigen::Matrix3f alphap = alphap_v.asDiagonal();
+
+    Eigen::Vector3f gammap_v(gamma_x->Value(), gamma_y->Value(), gamma_z->Value());
+    Eigen::Matrix3f gammap = gammap_v.asDiagonal();
+
+    Eigen::Vector3f alphao_v(alpha_roll->Value(), alpha_pitch->Value(), alpha_yaw->Value());
+    Eigen::Matrix3f alphao = alphao_v.asDiagonal();
+
+    Eigen::Vector3f gammao_v(gamma_roll->Value(), gamma_pitch->Value(), gamma_yaw->Value());
+    Eigen::Matrix3f gammao = gammao_v.asDiagonal();
+
     if (T->Value() == 0) {
         delta_t = (float)(data->DataDeltaTime()) / 1000000000.;
     } else {
@@ -318,28 +330,26 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f xidpp(input->ValueNoMutex(0, 4),input->ValueNoMutex(1, 4),input->ValueNoMutex(2, 4));
     Eigen::Vector3f xidppp(input->ValueNoMutex(0, 5),input->ValueNoMutex(1, 5),input->ValueNoMutex(2, 5));
 
-    Eigen::Vector3f w(input->ValueNoMutex(0, 6),input->ValueNoMutex(2, 6),input->ValueNoMutex(2, 6));
+    Eigen::Vector3f w(input->ValueNoMutex(0, 6),input->ValueNoMutex(1, 6),input->ValueNoMutex(2, 6));
 
     Eigen::Quaternionf q(input->ValueNoMutex(0, 7),input->ValueNoMutex(1, 7),input->ValueNoMutex(2, 7),input->ValueNoMutex(3, 7));
     
     input->ReleaseMutex();
 
-    Eigen::Vector3f alphap_v(alpha_x->Value(), alpha_y->Value(), alpha_z->Value());
-    Eigen::Matrix3f alphap = alphap_v.asDiagonal();
 
     //std::cout << "alphap = " << alphap << std::endl;
 
     Eigen::Vector3f nup = xiep + alphap*xie;
 
-    std::cout << "xie = \n" << xie << std::endl;
-    std::cout << "xiep = \n" << xiep << std::endl;
+    //std::cout << "xie = \n" << xie << std::endl;
+    //std::cout << "xiep = \n" << xiep << std::endl;
 
     sgnpos_p = signth(nup,1);
     sgnpos = rk4_vec(sgnpos, sgnpos_p, delta_t);
 
-    // sgnpos_p(0) = tanh(nup(0));
-    // sgnpos_p(1) = tanh(nup(1));
-    // sgnpos_p(2) = tanh(nup(2));
+    // sgnpos_p(0) = tanhf(nup(0));
+    // sgnpos_p(1) = tanhf(nup(1));
+    // sgnpos_p(2) = tanhf(nup(2));
 
     // std::cout << "sgnpos_p = " << sgnpos_p << std::endl;
 
@@ -349,8 +359,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     // std::cout << "sgnpos = " << sgnpos << std::endl;
 
-    Eigen::Vector3f gammap_v(gamma_x->Value(), gamma_y->Value(), gamma_z->Value());
-    Eigen::Matrix3f gammap = gammap_v.asDiagonal();
+    
 
     //std::cout << "gammap = " << gammap << std::endl;
 
@@ -367,12 +376,12 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f u = -Kpm*nurp - m->Value()*g->Value()*ez + m->Value()*xirpp; //- m->Value()*g->Value()*ez + m->Value()*xirpp
 
-    std::cout << "u = \n" << u << std::endl;
+    //std::cout << "u = \n" << u << std::endl;
 
 
     Trs = u.norm();
 
-    printf("Trs = %f\n", Trs);
+    //printf("Trs = %f\n", Trs);
 
     Eigen::Vector3f Qe3 = q.toRotationMatrix()*ez;
     // Eigen::Vector3f Qe3_(Qe3.x, Qe3.y, Qe3.z);
@@ -393,12 +402,12 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     // ud = levant.Compute(f,delta_t);
     
-    Eigen::Vector3f up = levant.Compute(u,delta_t);
+    //Eigen::Vector3f up = levant.Compute(u,delta_t);
 
-    // Eigen::Vector3f up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 
-    //                     -alphap*(Kpm+m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
+    Eigen::Vector3f up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 
+                        -alphap*(Kpm+m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
 
-    std::cout << "up = \n" << up << std::endl;
+    //std::cout << "up = \n" << up << std::endl;
 
 
     Eigen::Vector3f un = u.normalized();
@@ -410,7 +419,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     // qd.q1 = un(1)/sqrt(-2*un(2)+2);
     // qd.q2 = -un(0)/sqrt(-2*un(2)+2);
 
-    std::cout << "qd = \n" << qd.coeffs() << std::endl;
+    //std::cout << "qd = \n" << qd.coeffs() << std::endl;
 
     Eigen::Quaternionf qdp(-(0.5)*(upn(2)/sqrtf(-2*un(2)+2)),
                             (upn(1)/sqrtf(-2*un(2)+2)) + ((un(1)*upn(2))/powf(-2*un(2)+2,1.5)),
@@ -433,30 +442,32 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
                         -upn(0) + ( (un(0)*upn(2))/(1-un(2)) ), 
                         (un(1)*upn(0) - un(0)*upn(1))/(1-un(2)));
 
-    std::cout << "wd = \n" << wd << std::endl;
+    //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
+
+    //wd(1) = -wd(1);
+
+    //std::cout << "wd = \n" << wd << std::endl;
 
     // wd.x = upn(1) - ( (un(1)*upn(2))/(1-un(2)) );
     // wd.y = -upn(0) + ( (un(0)*upn(2))/(1-un(2)) );
     // wd.z = (un(1)*upn(0) - un(0)*upn(1))/(1-un(2));
 
-    Eigen::Vector3f we = w - wd;
+    Eigen::Vector3f we = w -(wd);
 
-    //Eigen::Quaternionf QdTqe = qdc*qe*qd;
+    //Eigen::Quaternionf QdTqe = qd.conjugate()*qe*qd;
 
     //std::cout << "QdTqe = \n" << QdTqe.coeffs() << std::endl;
 
-    //Eigen::Vector3f QdTqe3(QdTqe.x(),QdTqe.y(),QdTqe.z());
+    //Eigen::Vector3f QdTqe3 = QdTqe.vec();
 
     Eigen::Vector3f QdTqe3 = qd.toRotationMatrix().transpose()*qe.vec();
 
-    Eigen::Vector3f alphao_v(alpha_roll->Value(), alpha_pitch->Value(), alpha_yaw->Value());
-    Eigen::Matrix3f alphao = alphao_v.asDiagonal();
     
     //std::cout << "alphao = " << alphao << std::endl;
     
     Eigen::Vector3f nu = we + alphao*QdTqe3;
     
-    Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
+    Eigen::Vector3f nu_t0 = 0.0*Eigen::Vector3f(1,1,1);
     
     Eigen::Vector3f nud = nu_t0*exp(-k->Value()*(tactual));
     
@@ -467,16 +478,14 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     sgnori_p = signth(nuq,p->Value());
     sgnori = rk4_vec(sgnori, sgnori_p, delta_t);
     
-    // sgnori_p.x = signth(nuq.x,p->Value());
-    // sgnori_p.y = signth(nuq.y,p->Value());
-    // sgnori_p.z = signth(nuq.z,p->Value());
-    
-    // sgnori.x = rk4(function1d, sgnori.x, sgnori_p.x, delta_t);
-    // sgnori.y = rk4(function1d, sgnori.y, sgnori_p.y, delta_t);
-    // sgnori.z = rk4(function1d, sgnori.z, sgnori_p.z, delta_t);
+    // sgnori_p(0)= signth(nuq(0),p->Value());
+    // sgnori_p(1)= signth(nuq(1),p->Value());
+    // sgnori_p(2)= signth(nuq(2),p->Value());
 
-    Eigen::Vector3f gammao_v(gamma_roll->Value(), gamma_pitch->Value(), gamma_yaw->Value());
-    Eigen::Matrix3f gammao = gammao_v.asDiagonal();
+    // sgnori(0) = rk4(function1d, sgnori(0), sgnori_p(0), delta_t);
+    // sgnori(1) = rk4(function1d, sgnori(1), sgnori_p(1), delta_t);
+    // sgnori(2) = rk4(function1d, sgnori(2), sgnori_p(2), delta_t);
+
     
     Eigen::Vector3f nur = nuq + gammao*sgnori;
 

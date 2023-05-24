@@ -360,7 +360,7 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
 
     //Thread::Info("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
     Printf("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
-    Printf("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
+    //Printf("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
     //Thread::Info("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
 
     const AhrsData *currentOrientation = GetDefaultOrientation();
@@ -384,9 +384,9 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     Vector3Df xidpp = Vector3Df(0,0,0);
     Vector3Df xidppp = Vector3Df(0,0,0);
 
-    printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
+    //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
     
-    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularSpeed,currentQuaternion);
+    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularSpeed,uav_quat);
     
     u_sliding_pos->Update(GetTime());
     
