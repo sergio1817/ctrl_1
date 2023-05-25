@@ -63,14 +63,19 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
         //targetVrpn=new MetaVrpnObject("target");
     }
     
-    
-    jr3->Start();
     getFrameworkManager()->AddDeviceToLog(jr3);
+    jr3->Start();
 
+    //set vrpn as failsafe altitude sensor for mamboedu as us in not working well for the moment
+    if(uav->GetType()=="mamboedu") {
+        SetFailSafeAltitudeSensor(uavVrpn->GetAltitudeSensor());
+    }
+    
     getFrameworkManager()->AddDeviceToLog(uavVrpn);
-    //getFrameworkManager()->AddDeviceToLog(targetVrpn);
     vrpnclient->Start();
     
+    uav->GetAhrs()->YawPlot()->AddCurve(uavVrpn->State()->Element(2),DataPlot::Green);
+
     GroupBox *groupbox = new GroupBox(GetButtonsLayout()->NewRow(), "Controles");
     
     
@@ -140,7 +145,8 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     customOrientation=new AhrsData(this,"orientation");
 
     //getFrameworkManager()->AddDeviceToLog(u_sliding);
-    //AddDeviceToControlLawLog(u_sliding);
+    AddDeviceToControlLawLog(u_sliding);
+    AddDeviceToControlLawLog(u_sliding_pos);
 
 
 }
@@ -154,7 +160,7 @@ void ctrl1::ComputeCustomTorques(Euler &torques) {
     thrust = ComputeDefaultThrust();
     switch(control_select->CurrentIndex()) {
         case 0:
-            Printf("Fx:%f Fy:%f Fz:%f\n",jr3->GetFx(),jr3->GetFy(),jr3->GetFz());
+            //Printf("Fx:%f Fy:%f Fz:%f\n",jr3->GetFx(),jr3->GetFy(),jr3->GetFz());
             sliding_ctrl(torques);
             break;
         
@@ -300,23 +306,23 @@ void ctrl1::Stopctrl1(void) {
 
 
 void ctrl1::sliding_ctrl(Euler &torques){
-    float ti = double(GetTime());
+    flair::core::Time ti = GetTime();
     const AhrsData *refOrientation = GetDefaultReferenceOrientation();
     Quaternion refQuaternion;
     Vector3Df refAngularRates;
     refOrientation->GetQuaternionAndAngularRates(refQuaternion, refAngularRates);
-    float tf = (GetTime()-ti)/1000000000;
+    flair::core::Time  tf = GetTime()-ti;
 
-    printf("ref: %f\n", tf);
+    //Printf("ref: %f ms\n", (float)tf/1000000);
 
-    ti = double(GetTime());
+    ti = GetTime();
     const AhrsData *currentOrientation = GetDefaultOrientation();
     Quaternion currentQuaternion;
     Vector3Df currentAngularRates;
     currentOrientation->GetQuaternionAndAngularRates(currentQuaternion, currentAngularRates);
-    tf = (GetTime()-ti)/1000000000;
+    tf = tf = GetTime()-ti;
 
-    printf("cur: %f\n", tf);
+    //Printf("cur: %f ms\n",  (float)tf/1000000);
     
     //Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
@@ -349,55 +355,66 @@ void ctrl1::sliding_ctrl(Euler &torques){
 void ctrl1::sliding_ctrl_pos(Euler &torques){
     float tactual=double(GetTime())/1000000000-u_sliding_pos->t0;
     //printf("t: %f\n",tactual);
-
+    Vector3Df xid, xidp, xidpp, xidppp;
 
     Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
     Quaternion uav_quat;
 
+    flair::core::Time ti = GetTime();
     uavVrpn->GetPosition(uav_pos);
     uavVrpn->GetSpeed(uav_vel);
     uavVrpn->GetQuaternion(uav_quat);
+    flair::core::Time  tf = GetTime()-ti;
+
+    //Printf("pos: %f ms\n",  (float)tf/1000000);
 
     //Thread::Info("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
-    Printf("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
+    //Printf("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
     //Printf("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
     //Thread::Info("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
 
+    ti = GetTime();
     const AhrsData *currentOrientation = GetDefaultOrientation();
     Quaternion currentQuaternion;
     Vector3Df currentAngularRates;
     currentOrientation->GetQuaternionAndAngularRates(currentQuaternion, currentAngularRates);
+    tf = GetTime()-ti;
+
+    //Printf("ori: %f ms\n",  (float)tf/1000000);
     
     Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
-    double a = xd->Value(); // 0.1
-    double az = yd->Value(); // 0.001
-    double b = zd->Value(); // 0.01
+    double a = xdp->Value(); // 0.1
+    double az = ydp->Value(); // 0.001
+    double b = zdp->Value(); // 0.01
 
-    // Vector3Df xid = Vector3Df(a*sin(b*tactual),a*cos(b*tactual),az*sin(b*tactual)-2);
-    // Vector3Df xidp = Vector3Df(a*cos(b*tactual),-a*sin(b*tactual),az*cos(b*tactual));
-    // Vector3Df xidpp = Vector3Df(-a*sin(b*tactual),-a*cos(b*tactual),-az*sin(b*tactual));
-    // Vector3Df xidppp = Vector3Df(-a*cos(b*tactual),a*sin(b*tactual),-az*cos(b*tactual));
+    xid = Vector3Df(xd->Value(),yd->Value(),zd->Value());
+    xidp = Vector3Df(0,0,0);
+    xidpp = Vector3Df(0,0,0);
+    xidppp = Vector3Df(0,0,0);
 
-    Vector3Df xid = Vector3Df(xd->Value(),yd->Value(),zd->Value());
-    Vector3Df xidp = Vector3Df(0,0,0);
-    Vector3Df xidpp = Vector3Df(0,0,0);
-    Vector3Df xidppp = Vector3Df(0,0,0);
+    if(xdpp->Value() == 0){
+        xid = Vector3Df(a*sin(b*tactual),a*cos(b*tactual),az*sin(b*tactual)-2);
+        xidp = Vector3Df(a*cos(b*tactual),-a*sin(b*tactual),az*cos(b*tactual));
+        xidpp = Vector3Df(-a*sin(b*tactual),-a*cos(b*tactual),-az*sin(b*tactual));
+        xidppp = Vector3Df(-a*cos(b*tactual),a*sin(b*tactual),-az*cos(b*tactual));
+    }
+
+    
 
     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
     
-    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularSpeed,uav_quat);
+    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,uav_quat);
     
     u_sliding_pos->Update(GetTime());
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
-    if(xdpp->Value() == 0){
-        torques.roll = u_sliding_pos->Output(0);
-        torques.pitch = u_sliding_pos->Output(1);
-        torques.yaw = u_sliding_pos->Output(2);
-        thrust = u_sliding_pos->Output(3);
-    }
+    
+    torques.roll = u_sliding_pos->Output(0);
+    torques.pitch = u_sliding_pos->Output(1);
+    torques.yaw = u_sliding_pos->Output(2);
+    thrust = u_sliding_pos->Output(3);
     //thrust = ComputeDefaultThrust();
     
 

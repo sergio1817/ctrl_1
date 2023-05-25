@@ -3,9 +3,9 @@
 // CECILL-C License, Version 1.0.
 // %flair:license}
 /*!
- * \file Linear_impl.h
+ * \file Sliding.h
  * \brief Classe permettant le calcul d'un Pid
- * \author Guillaume Sanahuja, Copyright Heudiasyc UMR UTC/CNRS 7253
+ * \author Sergio Urzua, Copyright Heudiasyc UMR UTC/CNRS 7253
  * \date 2011/05/01
  * \version 4.0
  */
@@ -64,6 +64,7 @@ public:
     void UseDefaultPlot2(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot3(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot4(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot5(const flair::gui::LayoutPosition *position);
     
     flair::core::Time t0;
 

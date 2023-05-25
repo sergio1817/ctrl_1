@@ -107,7 +107,7 @@ void TargetEthJR3::AcquireSensorData(core::Matrix &axis) {
     while (getline(S, line, ';')){
         axis.SetValueNoMutex(i, 0, std::stof(line));
         i++;
-        if(i == axisNumber-1){
+        if(i == axisNumber){
             break;
         }
     }

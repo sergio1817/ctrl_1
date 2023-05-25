@@ -40,20 +40,23 @@ Sliding::Sliding(const LayoutPosition *position, string name): ControlLaw(positi
     // init matrix
     input = new Matrix(this, 5, 3, floatType, name);
   
-    MatrixDescriptor *desc = new MatrixDescriptor(4, 1);
+    MatrixDescriptor *desc = new MatrixDescriptor(7, 1);
     desc->SetElementName(0, 0, "u_roll");
     desc->SetElementName(1, 0, "u_pitch");
     desc->SetElementName(2, 0, "u_yaw");
     desc->SetElementName(3, 0, "u_z");
+    desc->SetElementName(4, 0, "nur_roll");
+    desc->SetElementName(5, 0, "nur_pitch");
+    desc->SetElementName(6, 0, "nur_yaw");
     state = new Matrix(this, desc, floatType, name);
     delete desc;
 
 
     GroupBox *reglages_groupbox = new GroupBox(position, name);
-    T = new DoubleSpinBox(reglages_groupbox->NewRow(), "period, 0 for auto", " s", 0, 1, 0.001,6);
+    T = new DoubleSpinBox(reglages_groupbox->NewRow(), "period, 0 for auto", " s", 0, 1, 0.001,3);
     k1 = new DoubleSpinBox(reglages_groupbox->NewRow(), "k1:", 0, 5000, 0.1, 3);
     k2 = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "k2:", 0, 5000, 0.1, 3);
-    gamma = new DoubleSpinBox(reglages_groupbox->NewRow(), "gamma:", -500, 500, 0.0001, 12);
+    gamma = new DoubleSpinBox(reglages_groupbox->NewRow(), "gamma:", -500, 500, 0.0001, 3);
     p = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "p:", 0, 50000, 1, 3);
     alpha = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "alpha:", 0, 50000, 0.5, 3);
     k = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "k:", 0, 50000, 0.5, 3);
@@ -63,7 +66,7 @@ Sliding::Sliding(const LayoutPosition *position, string name): ControlLaw(positi
     sat_y = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "sat yaw:", 0, 1, 0.1);
     sat_t = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "sat thrust:", 0, 1, 0.1);
     
-    km = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "km:", -10, 10, 0.01, 6);
+    km = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "km:", -10, 10, 0.01, 3);
     
     m = new DoubleSpinBox(reglages_groupbox->NewRow(),"m",0,2000,0.001,3);
     g = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(),"g",-10,10,0.01,3);
@@ -132,12 +135,20 @@ void Sliding::UseDefaultPlot4(const LayoutPosition *position) {
     
 }
 
+void Sliding::UseDefaultPlot5(const LayoutPosition *position) {    
+    DataPlot1D *Sq = new DataPlot1D(position, "nu_r", -5, 5);
+    Sq->AddCurve(state->Element(4), DataPlot::Green);
+    Sq->AddCurve(state->Element(5), DataPlot::Red);
+    Sq->AddCurve(state->Element(6), DataPlot::Black);
+    
+}
+
 
 void Sliding::UpdateFrom(const io_data *data) {
     float tactual=double(GetTime())/1000000000-t0;
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
 
-    //printf("tactual: %f\n",tactual);
+    printf("tactual: %f\n",tactual);
     
     if (T->Value() == 0) {
         delta_t = (float)(data->DataDeltaTime()) / 1000000000.;
@@ -180,7 +191,7 @@ void Sliding::UpdateFrom(const io_data *data) {
     
     Vector3Df nu = we + alpha->Value()*QdTqe3;
     
-    Vector3Df nu_t0 = 0.00*Vector3Df(1,1,1);
+    Vector3Df nu_t0 = 0.1*Vector3Df(1,1,1);
     
     Vector3Df nud = nu_t0*exp(-k->Value()*(tactual));
     
@@ -218,6 +229,9 @@ void Sliding::UpdateFrom(const io_data *data) {
     state->SetValueNoMutex(1, 0, tau_pitch);
     state->SetValueNoMutex(2, 0, tau_yaw);
     state->SetValueNoMutex(3, 0, Tr);
+    state->SetValueNoMutex(4, 0, nur.x);
+    state->SetValueNoMutex(5, 0, nur.y);
+    state->SetValueNoMutex(6, 0, nur.z);
     state->ReleaseMutex();
 
 

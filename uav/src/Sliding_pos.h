@@ -27,6 +27,8 @@ namespace flair {
     namespace gui {
         class LayoutPosition;
         class DoubleSpinBox;
+        class CheckBox;
+        class Label;
     }
 }
 
@@ -82,15 +84,18 @@ public:
 private:
     flair::core::Matrix *state;
     Levant_diff levant;
-    float ud, u1p, x, u1;
 
     float sech(float value);
 
+    flair::gui::CheckBox *levantd;
     flair::gui::DoubleSpinBox *T, *gamma, *k, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p, *km_z;
     flair::gui::DoubleSpinBox *gamma_roll, *gamma_pitch, *gamma_yaw, *gamma_x, *gamma_y, *gamma_z;
     flair::gui::DoubleSpinBox *alpha_roll, *alpha_pitch, *alpha_yaw, *alpha_x, *alpha_y, *alpha_z;
     flair::gui::DoubleSpinBox *Kd_roll, *Kd_pitch, *Kd_yaw, *Kd_x, *Kd_y, *Kd_z;
     flair::gui::DoubleSpinBox *Kp_roll, *Kp_pitch, *Kp_yaw, *Kp_x, *Kp_y, *Kp_z;
+    flair::gui::DoubleSpinBox *alpha_l,*lamb_l;
+
+    flair::gui::Label *lo, *lp;
     
     float Sat(float value, float borne);
     

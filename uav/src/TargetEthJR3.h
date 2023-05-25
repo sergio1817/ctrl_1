@@ -2,10 +2,10 @@
 // This file is part of the Flair framework distributed under the
 // CECILL-C License, Version 1.0.
 // %flair:license}
-//  created:    2015/04/14
+//  created:    2023/05/12
 //  filename:   TargetEthJR3.h
 //
-//  author:     Gildas Bayard
+//  author:     Sergio Urzua
 //              Copyright Heudiasyc UMR UTC/CNRS 7253
 //
 //  version:    $Id: $
@@ -18,8 +18,8 @@
 //
 /*********************************************************************/
 
-#ifndef TargetEthJR3_H
-#define TargetEthJR3_H
+#ifndef TARGETETHJR3_H
+#define TARGETETHJR3_H
 
 #include "TargetJR3.h"
 
@@ -46,7 +46,7 @@ namespace sensor {
 */
 class TargetEthJR3 : public TargetJR3 {
 public:
-  TargetEthJR3(std::string name, uint16_t port, uint8_t priority = 80);
+  TargetEthJR3(std::string name, uint16_t port, uint8_t priority = 0);
   ~TargetEthJR3();
   // void DrawUserInterface();
   std::string GetAxisName(unsigned int axisId) const;
@@ -80,4 +80,4 @@ private:
 }
 }
 
-#endif // TargetJR3_H
+#endif // TARGETETHJR3_H
