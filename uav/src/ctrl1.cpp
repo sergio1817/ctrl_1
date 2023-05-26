@@ -166,9 +166,13 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     u_sliding_force->UseDefaultPlot10(slidingTab->At(0, 2));
     u_sliding_force->UseDefaultPlot11(slidingTab->At(1, 2));
 
-    u_sliding_force->UseDefaultPlot5(errorsTab->At(0, 0));
-    u_sliding_force->UseDefaultPlot6(errorsTab->At(0, 1));
-    u_sliding_force->UseDefaultPlot7(errorsTab->At(0, 2));
+    u_sliding_force->UseDefaultPlot5(errorsTab->At(1, 0));
+    u_sliding_force->UseDefaultPlot6(errorsTab->At(1, 1));
+    u_sliding_force->UseDefaultPlot7(errorsTab->At(1, 2));
+
+    u_sliding_force->UseDefaultPlot12(errorsTab->At(0, 0));
+    u_sliding_force->UseDefaultPlot13(errorsTab->At(0, 1));
+    u_sliding_force->UseDefaultPlot14(errorsTab->At(0, 2));
 
     //getFrameworkManager()->AddDeviceToLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding);

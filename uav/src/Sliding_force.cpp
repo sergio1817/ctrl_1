@@ -45,7 +45,7 @@ Sliding_force::Sliding_force(const LayoutPosition *position, string name): Contr
     // init matrix
     input = new Matrix(this, 4, 10, floatType, name);
 
-    MatrixDescriptor *desc = new MatrixDescriptor(19, 1);
+    MatrixDescriptor *desc = new MatrixDescriptor(26, 1);
     desc->SetElementName(0, 0, "u_roll");
     desc->SetElementName(1, 0, "u_pitch");
     desc->SetElementName(2, 0, "u_yaw");
@@ -65,6 +65,13 @@ Sliding_force::Sliding_force(const LayoutPosition *position, string name): Contr
     desc->SetElementName(16, 0, "Sr_x");
     desc->SetElementName(17, 0, "Sr_y");
     desc->SetElementName(18, 0, "Sr_z");
+    desc->SetElementName(19, 0, "Fx");
+    desc->SetElementName(20, 0, "Fy");
+    desc->SetElementName(21, 0, "Fz");
+    desc->SetElementName(22, 0, "Fdx");
+    desc->SetElementName(23, 0, "Fdy");
+    desc->SetElementName(24, 0, "Fdz");
+    desc->SetElementName(25, 0, "pitch_f");
     state = new Matrix(this, desc, floatType, name);
     delete desc;
 
@@ -246,6 +253,7 @@ void Sliding_force::UseDefaultPlot5(const LayoutPosition *position) {
 void Sliding_force::UseDefaultPlot6(const LayoutPosition *position) {    
     DataPlot1D *p = new DataPlot1D(position, "p", -3.14, 3.14);
     p->AddCurve(state->Element(5));
+    p->AddCurve(state->Element(25), DataPlot::Blue);
     
 }
 
@@ -285,6 +293,24 @@ void Sliding_force::UseDefaultPlot11(const LayoutPosition *position) {
     Sr->AddCurve(state->Element(17), DataPlot::Red);
     Sr->AddCurve(state->Element(18), DataPlot::Black);
     
+}
+
+void Sliding_force::UseDefaultPlot12(const LayoutPosition *position) {    
+    DataPlot1D *Fx = new DataPlot1D(position, "Fx", -5, 5);
+    Fx->AddCurve(state->Element(19), DataPlot::Black);
+    Fx->AddCurve(state->Element(22), DataPlot::Blue);
+}
+
+void Sliding_force::UseDefaultPlot13(const LayoutPosition *position) {    
+    DataPlot1D *Fy = new DataPlot1D(position, "Fy", -5, 5);
+    Fy->AddCurve(state->Element(20), DataPlot::Black);
+    Fy->AddCurve(state->Element(23), DataPlot::Blue);
+}
+
+void Sliding_force::UseDefaultPlot14(const LayoutPosition *position) {    
+    DataPlot1D *Fz = new DataPlot1D(position, "Fz", -5, 5);
+    Fz->AddCurve(state->Element(21), DataPlot::Black);
+    Fz->AddCurve(state->Element(24), DataPlot::Blue);
 }
 
 
@@ -359,7 +385,7 @@ void Sliding_force::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f etap = Wi*w;
 
-    float pitchd = Fd(2)/(m->Value()*g->Value()); //F(0)
+    float pitchd = Fd(0)/(m->Value()*g->Value()); //F(0)
     float pitchdp = 0;
 
     //ForcePitch(tau(1),F(2)-Fd(2),eta.pitch-pitchd,etap(1)-pitchdp); //F(0)-Fd(0)
@@ -385,6 +411,13 @@ void Sliding_force::UpdateFrom(const io_data *data) {
     state->SetValueNoMutex(4, 0, etad.roll);
     state->SetValueNoMutex(5, 0, pitchd);
     state->SetValueNoMutex(6, 0, etad.yaw);
+    state->SetValueNoMutex(19, 0, F(0));
+    state->SetValueNoMutex(20, 0, F(1));
+    state->SetValueNoMutex(21, 0, F(2));
+    state->SetValueNoMutex(22, 0, Fd(0));
+    state->SetValueNoMutex(23, 0, Fd(1));
+    state->SetValueNoMutex(24, 0, Fd(2));
+    state->SetValueNoMutex(25, 0, pitchd);
     state->ReleaseMutex();
 
 
@@ -458,12 +491,12 @@ void Sliding_force::ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, f
 
     std::cout << "dLamb: \n" << dLamb << std::endl;
 
-    Sf(0) = rk4(function1d,Sf(0),dLamb(0),delta_t);
-    Sf(1) = rk4(function1d,Sf(1),dLamb(1),delta_t);
+    // Sf(0) = rk4(function1d,Sf(0),dLamb(0),delta_t);
+    // Sf(1) = rk4(function1d,Sf(1),dLamb(1),delta_t);
 
-    //Sf = dLamb;
+    Sf = dLamb;
 
-    std::cout << "Sf: \n" << Sf << std::endl;
+    //std::cout << "Sf: \n" << Sf << std::endl;
 
     Eigen::Vector2f Sdf0 = 0.0*Eigen::Vector2f(1,1);
 
