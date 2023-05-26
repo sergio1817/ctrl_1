@@ -399,7 +399,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
                             -(upn(0)/sqrtf(-2*un(2)+2)) - ((un(0)*upn(2))/powf(-2*un(2)+2,1.5)),
                             0);
 
-    Eigen::Vector3f eta = qd.toRotationMatrix().eulerAngles(2, 1, 0);
+    Quaternion qd2 = Quaternion(qd.w(),qd.x(),qd.y(),qd.z());
+    Euler eta = qd2.ToEuler();
+    // Eigen::Vector3f eta = qd.toRotationMatrix().eulerAngles(0, 1, 2);
 
     Eigen::Quaternionf qe = q*qd.conjugate();
 
@@ -434,7 +436,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f tau = -Kdm*nur;
 
-    flair::core::Time dt_ori = GetTime() - t0_p;
+    flair::core::Time dt_ori = GetTime() - t0_o;
 
     lo->SetText("Latecia ori: %.3f ms",(float)dt_ori/1000000);
 
@@ -457,9 +459,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     state->SetValueNoMutex(1, 0, tau_pitch);
     state->SetValueNoMutex(2, 0, tau_yaw);
     state->SetValueNoMutex(3, 0, Tr);
-    state->SetValueNoMutex(4, 0, eta.x());
-    state->SetValueNoMutex(5, 0, eta.y());
-    state->SetValueNoMutex(6, 0, eta.z());
+    state->SetValueNoMutex(4, 0, eta.roll);
+    state->SetValueNoMutex(5, 0, eta.pitch);
+    state->SetValueNoMutex(6, 0, eta.yaw);
     state->SetValueNoMutex(7, 0, nup.x());
     state->SetValueNoMutex(8, 0, nup.y());
     state->SetValueNoMutex(9, 0, nup.z());

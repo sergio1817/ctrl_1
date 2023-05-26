@@ -15,6 +15,7 @@
 #include "Sliding.h"
 #include "Sliding_pos.h"
 #include "TargetJR3.h"
+#include "Sliding_force.h"
 //#include "MetaJR3.h"
 #include <TargetController.h>
 #include <Uav.h>
@@ -95,25 +96,26 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
 
     GroupBox *posbox = new GroupBox(positionTab->At(0,0), "position");
     
-    xd = new DoubleSpinBox(posbox->NewRow(), "x", " m", -5, 5, 0.001, 3);
-    yd = new DoubleSpinBox(posbox->LastRowLastCol(), "y", " m", -5, 5, 0.001, 3);
-    zd = new DoubleSpinBox(posbox->LastRowLastCol(), "z", " m", -5, 5, 0.001, 3);
+    xd = new DoubleSpinBox(posbox->NewRow(), "x", " m", -10, 10, 0.001, 3);
+    yd = new DoubleSpinBox(posbox->LastRowLastCol(), "y", " m", -10, 10, 0.001, 3);
+    zd = new DoubleSpinBox(posbox->LastRowLastCol(), "z", " m", -10, 10, 0.001, 3);
 
-    xdp = new DoubleSpinBox(posbox->NewRow(), "xp", " m/s", -5, 5, 0.001, 3);
-    ydp = new DoubleSpinBox(posbox->LastRowLastCol(), "yp", " m/s", -5, 5, 0.001, 3);
-    zdp = new DoubleSpinBox(posbox->LastRowLastCol(), "zp", " m/s", -5, 5, 0.001, 3);
+    xdp = new DoubleSpinBox(posbox->NewRow(), "xp", " m/s", -10, 10, 0.001, 3);
+    ydp = new DoubleSpinBox(posbox->LastRowLastCol(), "yp", " m/s", -10, 10, 0.001, 3);
+    zdp = new DoubleSpinBox(posbox->LastRowLastCol(), "zp", " m/s", -10, 10, 0.001, 3);
 
-    xdpp = new DoubleSpinBox(posbox->NewRow(), "xpp", " m/s^2", -5, 5, 0.001, 3);
-    ydpp = new DoubleSpinBox(posbox->LastRowLastCol(), "ypp", " m/s^2", -5, 5, 0.001, 3);
-    zdpp = new DoubleSpinBox(posbox->LastRowLastCol(), "zpp", " m/s^2", -5, 5, 0.001, 3);
+    xdpp = new DoubleSpinBox(posbox->NewRow(), "xpp", " m/s^2", -10, 10, 0.001, 3);
+    ydpp = new DoubleSpinBox(posbox->LastRowLastCol(), "ypp", " m/s^2", -10, 10, 0.001, 3);
+    zdpp = new DoubleSpinBox(posbox->LastRowLastCol(), "zpp", " m/s^2", -10, 10, 0.001, 3);
 
-    xdppp = new DoubleSpinBox(posbox->NewRow(), "xppp", " m/s^3", -5, 5, 0.001, 3);
-    ydppp = new DoubleSpinBox(posbox->LastRowLastCol(), "yppp", " m/s^3", -5, 5, 0.001, 3);
-    zdppp = new DoubleSpinBox(posbox->LastRowLastCol(), "zppp", " m/s^3", -5, 5, 0.001, 3);
+    xdppp = new DoubleSpinBox(posbox->NewRow(), "xppp", " m/s^3", -10, 10, 0.001, 3);
+    ydppp = new DoubleSpinBox(posbox->LastRowLastCol(), "yppp", " m/s^3", -10, 10, 0.001, 3);
+    zdppp = new DoubleSpinBox(posbox->LastRowLastCol(), "zppp", " m/s^3", -10, 10, 0.001, 3);
     
     control_select=new ComboBox(groupbox->NewRow(),"select control");
     control_select->AddItem("Sliding");
     control_select->AddItem("Sliding Pos");
+    control_select->AddItem("Sliding Force-Position");
     
     l2 = new Label(groupbox->LastRowLastCol(), "Control selec");
     l2->SetText("Control: off");
@@ -144,9 +146,34 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     
     customOrientation=new AhrsData(this,"orientation");
 
+
+    Tab *lawTab3 = new Tab(getFrameworkManager()->GetTabWidget(), "Force");
+    TabWidget *tabWidget3 = new TabWidget(lawTab3->NewRow(), "laws");
+    
+    Tab *setupForceTab = new Tab(tabWidget3, "Setup");
+    Tab *slidingTab = new Tab(tabWidget3, "Sliding");
+    Tab *errorsTab = new Tab(tabWidget3, "Graphs");
+    Tab *outputTab = new Tab(tabWidget3, "Outputs");
+
+    u_sliding_force = new Sliding_force(setupForceTab->At(0, 0), "u_smc_force");
+    u_sliding_force->UseDefaultPlot(outputTab->At(0, 0));
+    u_sliding_force->UseDefaultPlot2(outputTab->At(0, 1));
+    u_sliding_force->UseDefaultPlot3(outputTab->At(0, 2));
+    u_sliding_force->UseDefaultPlot4(outputTab->At(1, 2));
+
+    u_sliding_force->UseDefaultPlot8(slidingTab->At(0, 0));
+    u_sliding_force->UseDefaultPlot9(slidingTab->At(0, 1));
+    u_sliding_force->UseDefaultPlot10(slidingTab->At(0, 2));
+    u_sliding_force->UseDefaultPlot11(slidingTab->At(1, 2));
+
+    u_sliding_force->UseDefaultPlot5(errorsTab->At(0, 0));
+    u_sliding_force->UseDefaultPlot6(errorsTab->At(0, 1));
+    u_sliding_force->UseDefaultPlot7(errorsTab->At(0, 2));
+
     //getFrameworkManager()->AddDeviceToLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding_pos);
+    AddDeviceToControlLawLog(u_sliding_force);
 
 
 }
@@ -167,7 +194,10 @@ void ctrl1::ComputeCustomTorques(Euler &torques) {
         case 1:
             sliding_ctrl_pos(torques);
             break;
-            
+        
+        case 2:
+            sliding_ctrl_force(torques);
+            break;
     }
     
 }
@@ -268,6 +298,7 @@ void ctrl1::Startctrl1(void) {
         Thread::Info("ctrl1: start\n");
         u_sliding->Reset();
         u_sliding_pos->Reset();
+        u_sliding_force->Reset();
     } else {
         Thread::Warn("ctrl1: could not start\n");
         l2->SetText("Control: err");
@@ -283,10 +314,12 @@ void ctrl1::Startctrl1(void) {
         case 1:
             l2->SetText("Control: Sliding pos");
             Thread::Info("Sliding pos\n");
-            //l2->SetText("Control: Nested");
-            //Thread::Info("Nested\n");
             break;
-            
+        
+        case 2:
+            l2->SetText("Control: Sliding force-position");
+            Thread::Info("Sliding force-position\n");
+            break;
     }
 
     behaviourMode=BehaviourMode_t::control;
@@ -418,4 +451,74 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     //thrust = ComputeDefaultThrust();
     
 
+}
+
+void ctrl1::sliding_ctrl_force(Euler &torques){
+    float tactual=double(GetTime())/1000000000-u_sliding_pos->t0;
+    //printf("t: %f\n",tactual);
+    Vector3Df xid, xidp, xidpp, xidppp;
+
+    Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
+    Quaternion uav_quat;
+
+    flair::core::Time ti = GetTime();
+    uavVrpn->GetPosition(uav_pos);
+    uavVrpn->GetSpeed(uav_vel);
+    uavVrpn->GetQuaternion(uav_quat);
+    flair::core::Time  tf = GetTime()-ti;
+
+    //Printf("pos: %f ms\n",  (float)tf/1000000);
+
+    //Thread::Info("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
+    //Printf("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
+    //Printf("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
+    //Thread::Info("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
+
+    ti = GetTime();
+    const AhrsData *currentOrientation = GetDefaultOrientation();
+    Quaternion currentQuaternion;
+    Vector3Df currentAngularRates;
+    currentOrientation->GetQuaternionAndAngularRates(currentQuaternion, currentAngularRates);
+    tf = GetTime()-ti;
+
+    //Printf("ori: %f ms\n",  (float)tf/1000000);
+    
+    Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
+    
+    double a = xdp->Value(); // 0.1
+    double az = ydp->Value(); // 0.001
+    double b = zdp->Value(); // 0.01
+
+    xid = Vector3Df(xd->Value(),yd->Value(),zd->Value());
+    xidp = Vector3Df(0,0,0);
+    xidpp = Vector3Df(0,0,0);
+    xidppp = Vector3Df(0,0,0);
+
+    if(xdpp->Value() == 0){
+        xid = Vector3Df(a*sin(b*tactual),a*cos(b*tactual),az*sin(b*tactual)-2);
+        xidp = Vector3Df(a*cos(b*tactual),-a*sin(b*tactual),az*cos(b*tactual));
+        xidpp = Vector3Df(-a*sin(b*tactual),-a*cos(b*tactual),-az*sin(b*tactual));
+        xidppp = Vector3Df(-a*cos(b*tactual),a*sin(b*tactual),-az*cos(b*tactual));
+    }
+
+    
+
+    //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
+
+    auto F = jr3->GetForce();
+
+    Vector3Df Fd = Vector3Df(xdppp->Value(),ydppp->Value(),zdppp->Value());
+    
+    u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,uav_quat,F,Fd);
+    
+    u_sliding_force->Update(GetTime());
+    
+    //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
+    
+    
+    torques.roll = u_sliding_force->Output(0);
+    torques.pitch = u_sliding_force->Output(1);
+    torques.yaw = u_sliding_force->Output(2);
+    thrust = u_sliding_force->Output(3);
+    //thrust = ComputeDefaultThrust();
 }

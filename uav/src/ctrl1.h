@@ -17,6 +17,7 @@
 #include <UavStateMachine.h>
 #include "Sliding.h"
 #include "Sliding_pos.h"
+#include "Sliding_force.h"
 
 namespace flair {
     namespace gui {
@@ -32,6 +33,7 @@ namespace flair {
         class ControlLaw;
         class Sliding;
         class Sliding_pos;
+        class Sliding_force;
     }
     namespace meta {
         class MetaVrpnObject;
@@ -68,10 +70,12 @@ class ctrl1 : public flair::meta::UavStateMachine {
         float ComputeCustomThrust(void);
         void sliding_ctrl(flair::core::Euler &torques);
         void sliding_ctrl_pos(flair::core::Euler &torques);
+        void sliding_ctrl_force(flair::core::Euler &torques);
         //const flair::core::AhrsData *GetOrientation(void) const;
 
         flair::filter::Sliding *u_sliding;
         flair::filter::Sliding_pos *u_sliding_pos;
+        flair::filter::Sliding_force *u_sliding_force;
 
         flair::meta::MetaVrpnObject *targetVrpn,*uavVrpn;
         

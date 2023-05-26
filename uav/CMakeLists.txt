@@ -26,6 +26,7 @@ SET(SRC_FILES
 	src/ctrl1.cpp
 	src/Sliding.cpp
 	src/Sliding_pos.cpp
+	src/Sliding_force.cpp
 	src/NMethods.cpp
 	#src/MetaJR3.cpp
 	src/TargetJR3.cpp
