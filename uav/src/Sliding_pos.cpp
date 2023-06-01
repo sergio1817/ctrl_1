@@ -107,7 +107,7 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     km_z = new DoubleSpinBox(mot->LastRowLastCol(), "km_z:", -100, 100, 0.01, 3);
     
     m = new DoubleSpinBox(pos->NewRow(),"m",0,2000,0.001,3);
-    g = new DoubleSpinBox(pos->LastRowLastCol(),"g",0,10,0.01,3);
+    g = new DoubleSpinBox(pos->LastRowLastCol(),"g",-10,10,0.01,3);
     lp = new Label(pos->LastRowLastCol(), "Latencia pos");
     
     t0 = double(GetTime())/1000000000;
