@@ -50,8 +50,15 @@ using namespace flair::meta;
 ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(controller), behaviourMode(BehaviourMode_t::Default), vrpnLost(false), jr3(jr3) {
     Uav* uav=GetUav();
 
-    //VrpnClient* vrpnclient=new VrpnClient("vrpn", uav->GetDefaultVrpnAddress(),80,uav->GetDefaultVrpnConnectionType());
-    VrpnClient* vrpnclient=new VrpnClient("vrpn", "192.168.147.103:3883",80,uav->GetDefaultVrpnConnectionType());
+    std::string ip_dir;
+    if(uav->GetType()=="x4_simu"){
+        ip_dir = uav->GetDefaultVrpnAddress();
+    } else {
+        ip_dir = "192.168.147.103:3883";
+    }
+    ip_dir = "192.168.147.103:3883";
+    VrpnClient* vrpnclient=new VrpnClient("vrpn", ip_dir,80,uav->GetDefaultVrpnConnectionType());
+    
     
     if(vrpnclient->ConnectionType()==VrpnClient::Xbee) {
         uavVrpn = new MetaVrpnObject(uav->ObjectName(),(uint8_t)0);
@@ -447,12 +454,16 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
+    if(ydpp->Value() == 0){
+        torques.roll = u_sliding_pos->Output(0);
+        torques.pitch = u_sliding_pos->Output(1);
+        torques.yaw = u_sliding_pos->Output(2);
+        thrust = u_sliding_pos->Output(3);
+    }else{
+        thrust = ComputeDefaultThrust();
+    }
     
-    torques.roll = u_sliding_pos->Output(0);
-    torques.pitch = u_sliding_pos->Output(1);
-    torques.yaw = u_sliding_pos->Output(2);
-    thrust = u_sliding_pos->Output(3);
-    //thrust = ComputeDefaultThrust();
+    //
     
 
 }

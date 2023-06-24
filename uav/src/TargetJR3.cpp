@@ -147,7 +147,7 @@ void TargetJR3::Run() {
         // Thread::Info("Debug: data frame is ready\n");
 
         AcquireSensorData(*axis);
-        l2->SetText("Latecia: %.3f ms",(float)dt_read/1000000);
+        //l2->SetText("Latecia: %.3f ms",(float)dt_read/1000000);
         // send the data
         axis->SetDataTime(GetTime());
         ProcessUpdate(axis);

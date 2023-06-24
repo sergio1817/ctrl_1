@@ -368,7 +368,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f Lambpv(powf(sech(nup(0)*1),2), powf(sech(nup(1)*1),2), powf(sech(nup(2)*1),2) );
     Eigen::Matrix3f Lambp = Lambpv.asDiagonal();
 
-    Eigen::Vector3f vec(sin(tactual), sin(tactual), sin(tactual));
+    //Eigen::Vector3f vec(sin(tactual), sin(tactual), sin(tactual));
 
     // float f = gammap->Value()*sin(alphap->Value()*tactual);
     // float alpha2 = Kp->Value();
@@ -379,17 +379,22 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     //ud = levant.Compute(f,delta_t);
 
     Eigen::Vector3f up;
-    Eigen::Vector3f ud;
+    // Eigen::Vector3f ud;
     if(levantd->IsChecked()){
         levant.setParam(alpha_l->Value(), lamb_l->Value());
-        ud = levant.Compute(vec,delta_t);
+        up = levant.Compute(u,delta_t);
+        //ud = levant.Compute(vec,delta_t);
     }else{
         up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 
-                        -alphap*(Kpm+m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
+                        -alphap*(Kpm + m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
     }
+
+    
 
     Eigen::Vector3f un = u.normalized();
     Eigen::Vector3f upn = up.normalized();
+
+    std::cout << "upn: " << upn << std::endl;
 
 
     Eigen::Quaternionf qd( (0.5)*sqrtf(-2*un(2)+2) , un(1)/sqrtf(-2*un(2)+2), -un(0)/sqrtf(-2*un(2)+2), 0);
@@ -405,23 +410,36 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Quaternionf qe = q*qd.conjugate();
 
-    Eigen::Vector3f wd(upn(1) - ( (un(1)*upn(2))/(1-un(2)) ), 
-                        -upn(0) + ( (un(0)*upn(2))/(1-un(2)) ), 
-                        (un(1)*upn(0) - un(0)*upn(1))/(1-un(2)));
+    std::cout<<"qe: " << qe.coeffs() << std::endl;
 
-    //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
+    // Eigen::Vector3f wd(upn(1) - ( (un(1)*upn(2))/(1-un(2)) ), 
+    //                     -upn(0) + ( (un(0)*upn(2))/(1-un(2)) ), 
+    //                     (un(1)*upn(0) - un(0)*upn(1))/(1-un(2)));
+
+    Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
+
+    std::cout<<"w: " << w << std::endl;
+    std::cout<<"wd: " << wd << std::endl;
+
+    
 
     flair::core::Time dt_pos = GetTime() - t0_p;
 
-    lp->SetText("Latecia pos: %.3f ms",(float)dt_pos/1000000);
+    //lp->SetText("Latecia pos: %.3f ms",(float)dt_pos/1000000);
 
     flair::core::Time t0_o = GetTime();
 
-    Eigen::Vector3f we = w -wd;
+    Eigen::Vector3f we = w - wd;
 
-    Eigen::Vector3f QdTqe3 = qd.toRotationMatrix().transpose()*qe.vec();
+    std::cout<<"we: " << we << std::endl;
 
-    Eigen::Vector3f nu = we + alphao*QdTqe3;
+    Eigen::Quaternionf QdTqe3 = qd.conjugate()*qe*qd;
+
+    std::cout<<"QdTqe3: " << QdTqe3.coeffs() << std::endl;
+
+    Eigen::Vector3f nu = we + alphao*QdTqe3.vec();
+
+    std::cout<<"nu: " << nu << std::endl;
     
     Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
     
@@ -438,7 +456,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     flair::core::Time dt_ori = GetTime() - t0_o;
 
-    lo->SetText("Latecia ori: %.3f ms",(float)dt_ori/1000000);
+    //lo->SetText("Latecia ori: %.3f ms",(float)dt_ori/1000000);
 
     
     tau_roll = (float)tau(0)/km->Value();
