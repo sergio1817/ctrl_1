@@ -391,17 +391,17 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     
 
-    Eigen::Vector3f un = u.normalized();
-    Eigen::Vector3f upn = up.normalized();
+    Eigen::Vector3f uh = u.normalized();
+    Eigen::Vector3f uph = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
 
-    std::cout << "upn: " << upn << std::endl;
+    std::cout << "uph: " << uph << std::endl;
 
 
-    Eigen::Quaternionf qd( (0.5)*sqrtf(-2*un(2)+2) , un(1)/sqrtf(-2*un(2)+2), -un(0)/sqrtf(-2*un(2)+2), 0);
+    Eigen::Quaternionf qd( (0.5)*sqrtf(-2*uh(2)+2) , uh(1)/sqrtf(-2*uh(2)+2), -uh(0)/sqrtf(-2*uh(2)+2), 0);
 
-    Eigen::Quaternionf qdp(-(0.5)*(upn(2)/sqrtf(-2*un(2)+2)),
-                            (upn(1)/sqrtf(-2*un(2)+2)) + ((un(1)*upn(2))/powf(-2*un(2)+2,1.5)),
-                            -(upn(0)/sqrtf(-2*un(2)+2)) - ((un(0)*upn(2))/powf(-2*un(2)+2,1.5)),
+    Eigen::Quaternionf qdp(-(0.5)*(uph(2)/sqrtf(-2*uh(2)+2)),
+                            (uph(1)/sqrtf(-2*uh(2)+2)) + ((uh(1)*uph(2))/powf(-2*uh(2)+2,1.5)),
+                            -(uph(0)/sqrtf(-2*uh(2)+2)) - ((uh(0)*uph(2))/powf(-2*uh(2)+2,1.5)),
                             0);
 
     Quaternion qd2 = Quaternion(qd.w(),qd.x(),qd.y(),qd.z());
@@ -412,11 +412,11 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     std::cout<<"qe: " << qe.coeffs() << std::endl;
 
-    // Eigen::Vector3f wd(upn(1) - ( (un(1)*upn(2))/(1-un(2)) ), 
-    //                     -upn(0) + ( (un(0)*upn(2))/(1-un(2)) ), 
-    //                     (un(1)*upn(0) - un(0)*upn(1))/(1-un(2)));
+    Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
+                        -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
+                        (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
 
-    Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
+    //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
 
     std::cout<<"w: " << w << std::endl;
     std::cout<<"wd: " << wd << std::endl;
