@@ -438,7 +438,7 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     xidppp = Vector3Df(0,0,0);
 
     if(xdpp->Value() == 0){
-        xid = Vector3Df(a*sin(b*tactual),a*cos(b*tactual),az*sin(b*tactual)-2);
+        xid = Vector3Df(a*sin(b*tactual),a*cos(b*tactual),az*sin(b*tactual)-1);
         xidp = Vector3Df(a*cos(b*tactual),-a*sin(b*tactual),az*cos(b*tactual));
         xidpp = Vector3Df(-a*sin(b*tactual),-a*cos(b*tactual),-az*sin(b*tactual));
         xidppp = Vector3Df(-a*cos(b*tactual),a*sin(b*tactual),-az*cos(b*tactual));
@@ -448,7 +448,7 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
 
     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
     
-    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,uav_quat);
+    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion);
     
     u_sliding_pos->Update(GetTime());
     

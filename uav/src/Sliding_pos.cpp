@@ -394,7 +394,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f uh = u.normalized();
     Eigen::Vector3f uph = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
 
-    std::cout << "uph: " << uph << std::endl;
+    //std::cout << "uph: " << uph << std::endl;
 
 
     Eigen::Quaternionf qd( (0.5)*sqrtf(-2*uh(2)+2) , uh(1)/sqrtf(-2*uh(2)+2), -uh(0)/sqrtf(-2*uh(2)+2), 0);
@@ -410,7 +410,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Quaternionf qe = q*qd.conjugate();
 
-    std::cout<<"qe: " << qe.coeffs() << std::endl;
+    //std::cout<<"qe: " << qe.coeffs() << std::endl;
 
     Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
                         -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
@@ -418,8 +418,8 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
 
-    std::cout<<"w: " << w << std::endl;
-    std::cout<<"wd: " << wd << std::endl;
+    //std::cout<<"w: " << w << std::endl;
+    //std::cout<<"wd: " << wd << std::endl;
 
     
 
@@ -431,15 +431,15 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f we = w - wd;
 
-    std::cout<<"we: " << we << std::endl;
+    //std::cout<<"we: " << we << std::endl;
 
     Eigen::Quaternionf QdTqe3 = qd.conjugate()*qe*qd;
 
-    std::cout<<"QdTqe3: " << QdTqe3.coeffs() << std::endl;
+    //std::cout<<"QdTqe3: " << QdTqe3.coeffs() << std::endl;
 
     Eigen::Vector3f nu = we + alphao*QdTqe3.vec();
 
-    std::cout<<"nu: " << nu << std::endl;
+    //std::cout<<"nu: " << nu << std::endl;
     
     Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
     
