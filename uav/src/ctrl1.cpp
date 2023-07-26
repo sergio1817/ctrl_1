@@ -95,29 +95,64 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     graphLawTab2 = new Tab(tabWidget2, "Graficas Sliding");
     graphLawTab3 = new Tab(tabWidget2, "Graficas Sliding Pos");
 
-    Tab *posTab = new Tab(getFrameworkManager()->GetTabWidget(), "position");
-    TabWidget *Pos_tabWidget = new TabWidget(posTab->NewRow(), "position");
+    //Tab *posTab = new Tab(getFrameworkManager()->GetTabWidget(), "position");
+    //TabWidget *Pos_tabWidget = new TabWidget(posTab->NewRow(), "position");
 
-    positionTab = new Tab(Pos_tabWidget, "Setup position");
-    positiongTab = new Tab(Pos_tabWidget, "Graph position");
+    positionTab = new Tab(tabWidget2, "Reference position");
+    positiongTab = new Tab(tabWidget2, "Desired orientation");
 
-    GroupBox *posbox = new GroupBox(positionTab->At(0,0), "position");
+    GroupBox *posbox = new GroupBox(positionTab->NewRow(), "Setup reference");
+    GroupBox *regbox = new GroupBox(positionTab->NewRow(), "Setup regulation");
+    GroupBox *trackbox = new GroupBox(positionTab->NewRow(), "Setup tracking");
+    GroupBox *trajbox = new GroupBox(positionTab->NewRow(), "Setup trajectory");
+
+    position_behavior = new ComboBox(posbox->NewRow(),"Select behavior");
+    position_behavior->AddItem("Regulation");
+    position_behavior->AddItem("Tracking");
+    position_behavior->AddItem("Trajectory");
+
+    xd_behavior = new ComboBox(trackbox->NewRow(),"Select xd behavior");
+    xd_behavior->AddItem("Regulation");
+    xd_behavior->AddItem("Sin");
+    xd_behavior->AddItem("Cos");
+
+    yd_behavior = new ComboBox(trackbox->LastRowLastCol(),"Select yd behavior");
+    yd_behavior->AddItem("Regulation");
+    yd_behavior->AddItem("Sin");
+    yd_behavior->AddItem("Cos");
+
+    zd_behavior = new ComboBox(trackbox->LastRowLastCol(),"Select zd behavior");
+    zd_behavior->AddItem("Regulation");
+    zd_behavior->AddItem("Sin");
+    zd_behavior->AddItem("Cos");
+
+    GroupBox *xdkbox = new GroupBox(trackbox->NewRow(), "xd");
+    GroupBox *ydkbox = new GroupBox(trackbox->LastRowLastCol(), "yd");
+    GroupBox *zdkbox = new GroupBox(trackbox->LastRowLastCol(), "zd");
     
-    xd = new DoubleSpinBox(posbox->NewRow(), "x", " m", -10, 10, 0.001, 3);
-    yd = new DoubleSpinBox(posbox->LastRowLastCol(), "y", " m", -10, 10, 0.001, 3);
-    zd = new DoubleSpinBox(posbox->LastRowLastCol(), "z", " m", -10, 10, 0.001, 3);
+    xd = new DoubleSpinBox(regbox->NewRow(), "x", " m", -2, 2, 0.1, 2);
+    yd = new DoubleSpinBox(regbox->LastRowLastCol(), "y", " m", -2, 2, 0.1, 2);
+    zd = new DoubleSpinBox(regbox->LastRowLastCol(), "z", " m", -2, 2, 0.1, 2);
+    
+    lx = new Label(xdkbox->NewRow(), "funcion");
+    lx->SetText("a*fnc(w*t) + b");
+    ax = new DoubleSpinBox(xdkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+    wx = new DoubleSpinBox(xdkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+    bx = new DoubleSpinBox(xdkbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
 
-    xdp = new DoubleSpinBox(posbox->NewRow(), "xp", " m/s", -10, 10, 0.001, 3);
-    ydp = new DoubleSpinBox(posbox->LastRowLastCol(), "yp", " m/s", -10, 10, 0.001, 3);
-    zdp = new DoubleSpinBox(posbox->LastRowLastCol(), "zp", " m/s", -10, 10, 0.001, 3);
+    ly = new Label(ydkbox->NewRow(), "funcion");
+    ly->SetText("a*fnc(w*t) + b");
+    ay = new DoubleSpinBox(ydkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+    wy = new DoubleSpinBox(ydkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+    by = new DoubleSpinBox(ydkbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
 
-    xdpp = new DoubleSpinBox(posbox->NewRow(), "xpp", " m/s^2", -10, 10, 0.001, 3);
-    ydpp = new DoubleSpinBox(posbox->LastRowLastCol(), "ypp", " m/s^2", -10, 10, 0.001, 3);
-    zdpp = new DoubleSpinBox(posbox->LastRowLastCol(), "zpp", " m/s^2", -10, 10, 0.001, 3);
+    lz = new Label(zdkbox->NewRow(), "funcion");
+    lz->SetText("a*fnc(w*t) + b");
+    az = new DoubleSpinBox(zdkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+    wz = new DoubleSpinBox(zdkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+    bz = new DoubleSpinBox(zdkbox->NewRow(), "Offset (b)", -3, 0, 0.1, 2);
 
-    xdppp = new DoubleSpinBox(posbox->NewRow(), "xppp", " m/s^3", -10, 10, 0.001, 3);
-    ydppp = new DoubleSpinBox(posbox->LastRowLastCol(), "yppp", " m/s^3", -10, 10, 0.001, 3);
-    zdppp = new DoubleSpinBox(posbox->LastRowLastCol(), "zppp", " m/s^3", -10, 10, 0.001, 3);
+    
     
     control_select=new ComboBox(groupbox->NewRow(),"select control");
     control_select->AddItem("Sliding");
@@ -347,6 +382,103 @@ void ctrl1::Stopctrl1(void) {
     EnterFailSafeMode();
 }
 
+void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vector3Df &xidppp, float tactual){
+    
+    switch(position_behavior->CurrentIndex()){
+    case 0:
+        // regulation
+        xid = Vector3Df(xd->Value(),yd->Value(),zd->Value());
+        xidp = Vector3Df(0,0,0);
+        xidpp = Vector3Df(0,0,0);
+        xidppp = Vector3Df(0,0,0);
+        break;
+    
+    case 1:
+        // tracking
+        switch(xd_behavior->CurrentIndex()){
+        case 0:
+            // regulation
+            xid.x = xd->Value();
+            xidp.x = 0;
+            xidpp.x = 0;
+            xidppp.x = 0;
+            break;
+        case 1:
+            // sin
+            xid.x = ax->Value()*sin(wx->Value()*tactual)+bx->Value();
+            xidp.x = ax->Value()*wx->Value()*cos(wx->Value()*tactual);
+            xidpp.x = -ax->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual);
+            xidppp.x = -ax->Value()*wx->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual);
+            break;
+        case 2:
+            // cos
+            xid.x = ax->Value()*cos(wx->Value()*tactual)+bx->Value();
+            xidp.x = -ax->Value()*wx->Value()*sin(wx->Value()*tactual);
+            xidpp.x = -ax->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual);
+            xidppp.x = ax->Value()*wx->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual);
+            break;
+        }
+
+        switch(yd_behavior->CurrentIndex()){
+        case 0:
+            // regulation
+            xid.y = yd->Value();
+            xidp.y = 0;
+            xidpp.y = 0;
+            xidppp.y = 0;
+            break;
+        case 1:
+            // sin
+            xid.y = ay->Value()*sin(wy->Value()*tactual)+by->Value();
+            xidp.y = ay->Value()*wy->Value()*cos(wy->Value()*tactual);
+            xidpp.y = -ay->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual);
+            xidppp.y = -ay->Value()*wy->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual);
+            break;
+        case 2:
+            // cos
+            xid.y = ay->Value()*cos(wy->Value()*tactual)+by->Value();
+            xidp.y = -ay->Value()*wy->Value()*sin(wy->Value()*tactual);
+            xidpp.y = -ay->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual);
+            xidppp.y = ay->Value()*wy->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual);
+            break;
+        }
+
+        switch(zd_behavior->CurrentIndex()){
+        case 0:
+            // regulation
+            xid.z = zd->Value();
+            xidp.z = 0;
+            xidpp.z = 0;
+            xidppp.z = 0;
+            break;
+        case 1:
+            // sin
+            xid.z = az->Value()*sin(wz->Value()*tactual)+bz->Value();
+            xidp.z = az->Value()*wz->Value()*cos(wz->Value()*tactual);
+            xidpp.z = -az->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual);
+            xidppp.z = -az->Value()*wz->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual);
+            break;
+        case 2:
+            // cos
+            xid.z = az->Value()*cos(wz->Value()*tactual)+bz->Value();
+            xidp.z = -az->Value()*wz->Value()*sin(wz->Value()*tactual);
+            xidpp.z = -az->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual);
+            xidppp.z = az->Value()*wz->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual);
+            break;
+        }
+        break;
+    
+    case 2:
+        // trajectory
+        break;
+    default:
+        xid = Vector3Df(0,0,0);
+        xidp = Vector3Df(0,0,0);
+        xidpp = Vector3Df(0,0,0);
+        xidppp = Vector3Df(0,0,0);
+        break;
+    }
+}
 
 
 void ctrl1::sliding_ctrl(Euler &torques){
@@ -428,23 +560,8 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     
     Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
-    double a = xdp->Value(); // 0.1
-    double az = ydp->Value(); // 0.001
-    double b = zdp->Value(); // 0.01
 
-    xid = Vector3Df(xd->Value(),yd->Value(),zd->Value());
-    xidp = Vector3Df(0,0,0);
-    xidpp = Vector3Df(0,0,0);
-    xidppp = Vector3Df(0,0,0);
-
-    if(xdpp->Value() == 0){
-        xid = Vector3Df(a*sin(b*tactual),a*cos(b*tactual),az*sin(b*tactual)-1);
-        xidp = Vector3Df(a*cos(b*tactual),-a*sin(b*tactual),az*cos(b*tactual));
-        xidpp = Vector3Df(-a*sin(b*tactual),-a*cos(b*tactual),-az*sin(b*tactual));
-        xidppp = Vector3Df(-a*cos(b*tactual),a*sin(b*tactual),-az*cos(b*tactual));
-    }
-
-    
+    pos_reference(xid, xidp, xidpp, xidppp, tactual);
 
     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
     
@@ -454,17 +571,13 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
-    if(ydpp->Value() == 0){
-        torques.roll = u_sliding_pos->Output(0);
-        torques.pitch = u_sliding_pos->Output(1);
-        torques.yaw = u_sliding_pos->Output(2);
-        thrust = u_sliding_pos->Output(3);
-    }else{
-        thrust = ComputeDefaultThrust();
-    }
+
+    torques.roll = u_sliding_pos->Output(0);
+    torques.pitch = u_sliding_pos->Output(1);
+    torques.yaw = u_sliding_pos->Output(2);
+    thrust = u_sliding_pos->Output(3);
     
-    //
-    
+
 
 }
 
@@ -500,29 +613,12 @@ void ctrl1::sliding_ctrl_force(Euler &torques){
     
     Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
-    double a = xdp->Value(); // 0.1
-    double az = ydp->Value(); // 0.001
-    double b = zdp->Value(); // 0.01
-
-    xid = Vector3Df(xd->Value(),yd->Value(),zd->Value());
-    xidp = Vector3Df(0,0,0);
-    xidpp = Vector3Df(0,0,0);
-    xidppp = Vector3Df(0,0,0);
-
-    if(xdpp->Value() == 0){
-        xid = Vector3Df(a*sin(b*tactual),a*cos(b*tactual),az*sin(b*tactual)-2);
-        xidp = Vector3Df(a*cos(b*tactual),-a*sin(b*tactual),az*cos(b*tactual));
-        xidpp = Vector3Df(-a*sin(b*tactual),-a*cos(b*tactual),-az*sin(b*tactual));
-        xidppp = Vector3Df(-a*cos(b*tactual),a*sin(b*tactual),-az*cos(b*tactual));
-    }
-
-    
 
     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
 
     auto F = jr3->GetForce();
 
-    Vector3Df Fd = Vector3Df(xdppp->Value(),ydppp->Value(),zdppp->Value());
+    Vector3Df Fd = Vector3Df(0,0,0);
     
     u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,uav_quat,F,Fd);
     
@@ -530,12 +626,10 @@ void ctrl1::sliding_ctrl_force(Euler &torques){
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
-    if(ydpp->Value() == 0){
-        torques.roll = u_sliding_force->Output(0);
-        torques.pitch = u_sliding_force->Output(1);
-        torques.yaw = u_sliding_force->Output(2);
-        thrust = u_sliding_force->Output(3);
-    }
+    torques.roll = u_sliding_force->Output(0);
+    torques.pitch = u_sliding_force->Output(1);
+    torques.yaw = u_sliding_force->Output(2);
+    thrust = u_sliding_force->Output(3);
     
     //thrust = ComputeDefaultThrust();
 }

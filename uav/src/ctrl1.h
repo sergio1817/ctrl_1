@@ -72,6 +72,7 @@ class ctrl1 : public flair::meta::UavStateMachine {
         void sliding_ctrl_pos(flair::core::Euler &torques);
         void sliding_ctrl_force(flair::core::Euler &torques);
         //const flair::core::AhrsData *GetOrientation(void) const;
+        void pos_reference(flair::core::Vector3Df &xid, flair::core::Vector3Df &xidp, flair::core::Vector3Df &xidpp, flair::core::Vector3Df &xidppp, float tactual);
 
         flair::filter::Sliding *u_sliding;
         flair::filter::Sliding_pos *u_sliding_pos;
@@ -83,14 +84,14 @@ class ctrl1 : public flair::meta::UavStateMachine {
 
         float thrust;
 
-        flair::gui::DoubleSpinBox *xd, *yd, *zd, *xdp, *ydp, *zdp, *xdpp, *ydpp, *zdpp, *xdppp, *ydppp, *zdppp;
+        flair::gui::DoubleSpinBox *xd, *yd, *zd, *ax, *wx, *bx, *ay, *wy, *by, *az, *wz, *bz;
 
         flair::gui::PushButton *start_prueba1,*stop_prueba1;
-        flair::gui::ComboBox *control_select;   
+        flair::gui::ComboBox *control_select, *position_behavior, *xd_behavior, *yd_behavior, *zd_behavior;   
         flair::gui::Tab *setupLawTab2, *graphLawTab2, *lawTab2, *setupLawTab3, *graphLawTab3, *positionTab, *positiongTab;
         flair::gui::TabWidget *tabWidget2, *Pos_tabWidget;
         flair::gui::GroupBox *seg;
-        flair::gui::Label *l, *l2;
+        flair::gui::Label *l, *l2, *lx, *ly, *lz;
 
         flair::core::AhrsData *customReferenceOrientation,*customOrientation;
         
