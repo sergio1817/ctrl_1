@@ -238,11 +238,19 @@ void ctrl1::ComputeCustomTorques(Euler &torques) {
             break;
         
         case 1:
-            sliding_ctrl_pos(torques);
+            if(vrpnLost==true){
+                Thread::Err("Posrition control can't start: VRPN lost\n");
+            } else {
+                sliding_ctrl_pos(torques);
+            }
             break;
         
         case 2:
-            sliding_ctrl_force(torques);
+            if(vrpnLost==true){
+                Thread::Err("Force-position control can't start: VRPN lost or JR3 disconnected\n");
+            } else {
+                sliding_ctrl_force(torques);
+            }
             break;
     }
     

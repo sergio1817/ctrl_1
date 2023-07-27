@@ -68,7 +68,7 @@ TargetEthJR3::~TargetEthJR3() {
 }
 
 bool TargetEthJR3::IsConnected() const {
-  // TODO
+  return conected;
 }
 
 bool TargetEthJR3::IsDataFrameReady() {
@@ -133,7 +133,7 @@ bool TargetEthJR3::SensorInitialization() {
   bool mustReadMore;
 
   listeningSocket->Listen(listeningPort);
-  Thread::Info("Debug: Listening to port %d\n", listeningPort);
+  //Thread::Info("Debug: Listening to port %d\n", listeningPort);
   // accept incoming connection
   while (!controlSocket) {
     try {
@@ -149,7 +149,8 @@ bool TargetEthJR3::SensorInitialization() {
         return false;
     }
   }
-  Thread::Info("Debug: Connexion accepted\n");
+  
+  //Thread::Info("Debug: Connexion accepted\n");
 
   // get axis stuff
   bool axisNumberRead = false;
@@ -206,7 +207,7 @@ bool TargetEthJR3::SensorInitialization() {
     }
     
     desc->SetElementName(i, 0, axisName[i]);
-    
+
     //Thread::Info("Debug: axisName for axis %d %s\n", i, axisName[i].c_str());
     
   }
@@ -227,6 +228,7 @@ bool TargetEthJR3::SensorInitialization() {
   receiveFrameBuffer = new char[64];
 
   Thread::Info("JR3 connected with host side\n");
+  conected = true;
   return true;
 }
 

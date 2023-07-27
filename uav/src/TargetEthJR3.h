@@ -50,6 +50,7 @@ public:
   ~TargetEthJR3();
   // void DrawUserInterface();
   std::string GetAxisName(unsigned int axisId) const;
+  bool conected = false;
 protected:
   bool IsConnected() const;
   // axis stuff
