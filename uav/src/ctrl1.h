@@ -73,6 +73,7 @@ class ctrl1 : public flair::meta::UavStateMachine {
         void sliding_ctrl_force(flair::core::Euler &torques);
         //const flair::core::AhrsData *GetOrientation(void) const;
         void pos_reference(flair::core::Vector3Df &xid, flair::core::Vector3Df &xidp, flair::core::Vector3Df &xidpp, flair::core::Vector3Df &xidppp, float tactual);
+        void force_reference(flair::core::Vector3Df &fd, float tactual);
 
         flair::filter::Sliding *u_sliding;
         flair::filter::Sliding_pos *u_sliding_pos;
@@ -92,6 +93,10 @@ class ctrl1 : public flair::meta::UavStateMachine {
         flair::gui::TabWidget *tabWidget2, *Pos_tabWidget;
         flair::gui::GroupBox *seg;
         flair::gui::Label *l, *l2, *lx, *ly, *lz;
+
+        flair::gui::ComboBox *force_behavior, *fx_behavior, *fy_behavior, *fz_behavior;
+        flair::gui::DoubleSpinBox *fxd, *fyd, *fzd, *afx, *wfx, *bfx, *afy, *wfy, *bfy, *afz, *wfz, *bfz;
+        flair::gui::Label *lfx, *lfy, *lfz;
 
         flair::core::AhrsData *customReferenceOrientation,*customOrientation;
         

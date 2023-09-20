@@ -100,7 +100,7 @@ private:
     flair::gui::DoubleSpinBox *Kd_roll, *Kd_pitch, *Kd_yaw, *Kd_x, *Kd_y, *Kd_z;
     flair::gui::DoubleSpinBox *Kp_roll, *Kp_pitch, *Kp_yaw, *Kp_x, *Kp_y, *Kp_z;
     flair::gui::DoubleSpinBox *alpha_l,*lamb_l;
-    flair::gui::DoubleSpinBox *gamma_fx, *gamma_fy, *gamma_fz, *beta_1, *beta_2, *eta, *mu, *kf, *kf_x, *alpha_fx;
+    flair::gui::DoubleSpinBox *gamma_fx, *gamma_fy, *gamma_fz, *beta_1, *beta_2, *eta_1, *eta_2, *muf, *mup, *kf, *kf_x, *alpha_fx, *alphapf1;
 
     flair::gui::Label *lo, *lp;
     
@@ -111,6 +111,8 @@ private:
     bool first_update;
     
     Eigen::Vector3f sgnpos_p, sgnpos, sgnori_p, sgnori;
+
+    float dFi_;
 
     Eigen::Vector2f Sf, dLamb;
     Eigen::Vector2f sgnf, sgnfp;

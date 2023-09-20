@@ -197,6 +197,59 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     Tab *errorsTab = new Tab(tabWidget3, "Graphs");
     Tab *outputTab = new Tab(tabWidget3, "Outputs");
 
+    Tab *ref = new Tab(tabWidget3, "Reference force");
+
+    GroupBox *forcebox = new GroupBox(ref->NewRow(), "Setup reference");
+    GroupBox *regboxf = new GroupBox(ref->NewRow(), "Setup regulation");
+    GroupBox *trackboxf = new GroupBox(ref->NewRow(), "Setup tracking");
+    GroupBox *trajboxf = new GroupBox(ref->NewRow(), "Setup trajectory");
+
+    force_behavior = new ComboBox(forcebox->NewRow(),"Select behavior");
+    force_behavior->AddItem("Regulation");
+    force_behavior->AddItem("Tracking");
+    force_behavior->AddItem("Trajectory");
+
+    fx_behavior = new ComboBox(trackboxf->NewRow(),"Select fxd behavior");
+    fx_behavior->AddItem("Regulation");
+    fx_behavior->AddItem("Sin");
+    fx_behavior->AddItem("Cos");
+
+    fy_behavior = new ComboBox(trackboxf->LastRowLastCol(),"Select fyd behavior");
+    fy_behavior->AddItem("Regulation");
+    fy_behavior->AddItem("Sin");
+    fy_behavior->AddItem("Cos");
+
+    fz_behavior = new ComboBox(trackboxf->LastRowLastCol(),"Select fzd behavior");
+    fz_behavior->AddItem("Regulation");
+    fz_behavior->AddItem("Sin");
+    fz_behavior->AddItem("Cos");
+
+    GroupBox *fxkbox = new GroupBox(trackboxf->NewRow(), "fxd");
+    GroupBox *fykbox = new GroupBox(trackboxf->LastRowLastCol(), "fyd");
+    GroupBox *fzkbox = new GroupBox(trackboxf->LastRowLastCol(), "fzd");
+    
+    fxd = new DoubleSpinBox(regboxf->NewRow(), "fx", " N", -2, 2, 0.1, 2);
+    fyd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fy", " N", -2, 2, 0.1, 2);
+    fzd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fz", " N", -2, 2, 0.1, 2);
+    
+    lfx = new Label(fxkbox->NewRow(), "funcion");
+    lfx->SetText("a*fnc(w*t) + b");
+    afx = new DoubleSpinBox(fxkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+    wfx = new DoubleSpinBox(fxkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+    bfx = new DoubleSpinBox(fxkbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
+
+    lfy = new Label(fykbox->NewRow(), "funcion");
+    lfy->SetText("a*fnc(w*t) + b");
+    afy = new DoubleSpinBox(fykbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+    wfy = new DoubleSpinBox(fykbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+    bfy = new DoubleSpinBox(fykbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
+
+    lfz = new Label(fzkbox->NewRow(), "funcion");
+    lfz->SetText("a*fnc(w*t) + b");
+    afz = new DoubleSpinBox(fzkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+    wfz = new DoubleSpinBox(fzkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+    bfz = new DoubleSpinBox(fzkbox->NewRow(), "Offset (b)", -3, 0, 0.1, 2);
+
     u_sliding_force = new Sliding_force(setupForceTab->At(0, 0), "u_smc_force");
     u_sliding_force->UseDefaultPlot(outputTab->At(0, 0));
     u_sliding_force->UseDefaultPlot2(outputTab->At(0, 1));
@@ -268,12 +321,12 @@ void ctrl1::ExtraSecurityCheck(void) {
         //     EnterFailSafeMode();
         //     Land();
         // }
-        if (!uavVrpn->IsTracked(500)) {
-            Thread::Err("VRPN, uav lost\n");
-            vrpnLost=true;
-            EnterFailSafeMode();
-            Land();
-        }
+        // if (!uavVrpn->IsTracked(500)) {
+        //     Thread::Err("VRPN, uav lost\n");
+        //     vrpnLost=true;
+        //     EnterFailSafeMode();
+        //     Land();
+        // }
     }
 }
 
@@ -488,6 +541,71 @@ void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vec
     }
 }
 
+void ctrl1::force_reference(Vector3Df &fd, float tactual){
+    
+    switch(force_behavior->CurrentIndex()){
+    case 0:
+        // regulation
+        fd = Vector3Df(fxd->Value(),fyd->Value(),fzd->Value());
+        break;
+    
+    case 1:
+        // tracking
+        switch(fx_behavior->CurrentIndex()){
+        case 0:
+            // regulation
+            fd.x = fxd->Value();
+            break;
+        case 1:
+            // sin
+            fd.x = afx->Value()*sin(wfx->Value()*tactual)+bfx->Value();
+            break;
+        case 2:
+            // cos
+            fd.x = afx->Value()*cos(wfx->Value()*tactual)+bfx->Value();
+            break;
+        }
+
+        switch(fy_behavior->CurrentIndex()){
+        case 0:
+            // regulation
+            fd.y = fyd->Value();
+            break;
+        case 1:
+            // sin
+            fd.y = afy->Value()*sin(wfy->Value()*tactual)+bfy->Value();
+            break;
+        case 2:
+            // cos
+            fd.y = afy->Value()*cos(wfy->Value()*tactual)+bfy->Value();
+            break;
+        }
+
+        switch(fz_behavior->CurrentIndex()){
+        case 0:
+            // regulation
+            fd.z = fzd->Value();
+            break;
+        case 1:
+            // sin
+            fd.z = afz->Value()*sin(wfz->Value()*tactual)+bfz->Value();
+            break;
+        case 2:
+            // cos
+            fd.z = afz->Value()*cos(wfz->Value()*tactual)+bfz->Value();
+            break;
+        }
+        break;
+    
+    case 2:
+        // trajectory
+        break;
+    default:
+        fd = Vector3Df(0,0,0);
+        break;
+    }
+}
+
 
 void ctrl1::sliding_ctrl(Euler &torques){
     flair::core::Time ti = GetTime();
@@ -528,8 +646,8 @@ void ctrl1::sliding_ctrl(Euler &torques){
     torques.roll = u_sliding->Output(0);
     torques.pitch = u_sliding->Output(1);
     torques.yaw = u_sliding->Output(2);
-    thrust = u_sliding->Output(3);
-    //thrust = ComputeDefaultThrust();
+    //thrust = u_sliding->Output(3);
+    thrust = ComputeDefaultThrust();
     
 
 }
@@ -588,9 +706,9 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
 }
 
 void ctrl1::sliding_ctrl_force(Euler &torques){
-    float tactual=double(GetTime())/1000000000-u_sliding_pos->t0;
+    float tactual=double(GetTime())/1000000000-u_sliding_force->t0;
     //printf("t: %f\n",tactual);
-    Vector3Df xid, xidp, xidpp, xidppp;
+    Vector3Df xid(0,0,-1), xidp, xidpp, xidppp;
 
     Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
     Quaternion uav_quat;
@@ -622,9 +740,11 @@ void ctrl1::sliding_ctrl_force(Euler &torques){
 
     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
 
-    auto F = jr3->GetForce();
+    Vector3Df F = jr3->GetForce();
 
-    Vector3Df Fd = Vector3Df(0,0,0);
+    Vector3Df Fd;
+
+    force_reference(Fd, tactual);
     
     u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,uav_quat,F,Fd);
     

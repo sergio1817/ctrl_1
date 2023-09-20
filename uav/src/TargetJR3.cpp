@@ -42,7 +42,7 @@ TargetJR3::TargetJR3(string name,uint8_t priority) : Thread(getFrameworkManager(
     tab = new TabWidget(main_tab->NewRow(),name);
     setup_tab=new Tab(tab,"Reglages");
 
-    SetPeriodMS(50);
+    SetPeriodMS(5);
     GroupBox *setup = new GroupBox(setup_tab->NewRow(), "setup");
     T = new SpinBox(setup->NewRow(), "Sampling time", " us", 0, 100000, 1,0);
     setTs = new PushButton(setup->LastRowLastCol(),"Set Ts");
