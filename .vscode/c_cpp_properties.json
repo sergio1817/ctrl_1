@@ -25,6 +25,8 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "${FLAIR_ROOT}/flair-install/**",
+                "${FLAIR_ROOT}/flair-src/**",
+                "${FLAIR_ROOT}/flair-hds/**",
                 "${EIGEN3_INCLUDE_DIR}/**"
             ],
             "defines": [],
@@ -37,7 +39,9 @@
             "browse": {
                 "path": [
                     "${workspaceFolder}/**",
-                    "${FLAIR_ROOT}/flair-install/**"
+                    "${FLAIR_ROOT}/flair-install/**",
+                    "${FLAIR_ROOT}/flair-src/**",
+                    "${FLAIR_ROOT}/flair-hds/**"
                 ],
                 "limitSymbolsToIncludedHeaders": true
             }

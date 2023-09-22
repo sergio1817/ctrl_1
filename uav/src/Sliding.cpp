@@ -152,7 +152,7 @@ void Sliding::UseDefaultPlot4(const LayoutPosition *position) {
 }
 
 void Sliding::UseDefaultPlot5(const LayoutPosition *position) {    
-    DataPlot1D *Sq = new DataPlot1D(position, "nu_r", -5, 5);
+    DataPlot1D *Sq = new DataPlot1D(position, "nu_q", -5, 5);
     Sq->AddCurve(state->Element(4), DataPlot::Green);
     Sq->AddCurve(state->Element(5), DataPlot::Red);
     Sq->AddCurve(state->Element(6), DataPlot::Black);
@@ -260,9 +260,9 @@ void Sliding::UpdateFrom(const io_data *data) {
     state->SetValueNoMutex(1, 0, tau_pitch);
     state->SetValueNoMutex(2, 0, tau_yaw);
     state->SetValueNoMutex(3, 0, Tr);
-    state->SetValueNoMutex(4, 0, nur(0));
-    state->SetValueNoMutex(5, 0, nur(1));
-    state->SetValueNoMutex(6, 0, nur(2));
+    state->SetValueNoMutex(4, 0, nuq(0));
+    state->SetValueNoMutex(5, 0, nuq(1));
+    state->SetValueNoMutex(6, 0, nuq(2));
     state->ReleaseMutex();
 
 

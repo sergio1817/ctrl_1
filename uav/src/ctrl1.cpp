@@ -171,6 +171,7 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     u_sliding->UseDefaultPlot2(graphLawTab2->At(0, 1));
     u_sliding->UseDefaultPlot3(graphLawTab2->At(0, 2));
     u_sliding->UseDefaultPlot4(graphLawTab2->At(1, 2));
+    u_sliding->UseDefaultPlot5(graphLawTab2->At(1, 0));
 
     u_sliding_pos = new Sliding_pos(setupLawTab3->At(0, 0), "u_smc_pos");
     u_sliding_pos->UseDefaultPlot(graphLawTab3->At(0, 0));
@@ -363,12 +364,14 @@ void ctrl1::SignalEvent(Event_t event) {
         l2->SetText("Control: off");
         control_select->setEnabled(true);
         //first_update==true;
+        vrpnLost=false;
         behaviourMode=BehaviourMode_t::Default;
         break;
     case Event_t::EnteringFailSafeMode:
         l2->SetText("Control: off");
         control_select->setEnabled(true);
         //first_update==true;
+        vrpnLost=false;
         behaviourMode=BehaviourMode_t::Default;
         break;
     }
@@ -608,25 +611,30 @@ void ctrl1::force_reference(Vector3Df &fd, float tactual){
 
 
 void ctrl1::sliding_ctrl(Euler &torques){
-    flair::core::Time ti = GetTime();
+    //flair::core::Time ti = GetTime();
     const AhrsData *refOrientation = GetDefaultReferenceOrientation();
     Quaternion refQuaternion;
     Vector3Df refAngularRates;
     refOrientation->GetQuaternionAndAngularRates(refQuaternion, refAngularRates);
-    flair::core::Time  tf = GetTime()-ti;
+    //flair::core::Time  tf = GetTime()-ti;
 
     //Printf("ref: %f ms\n", (float)tf/1000000);
 
-    ti = GetTime();
+    Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
+    Quaternion uav_quat;
+
+    
+
+    //ti = GetTime();
     const AhrsData *currentOrientation = GetDefaultOrientation();
     Quaternion currentQuaternion;
     Vector3Df currentAngularRates;
     currentOrientation->GetQuaternionAndAngularRates(currentQuaternion, currentAngularRates);
-    tf = tf = GetTime()-ti;
+    //tf = tf = GetTime()-ti;
 
     //Printf("cur: %f ms\n",  (float)tf/1000000);
     
-    //Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
+    Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
     float refAltitude, refVerticalVelocity;
     GetDefaultReferenceAltitude(refAltitude, refVerticalVelocity);
@@ -660,11 +668,11 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
     Quaternion uav_quat;
 
-    flair::core::Time ti = GetTime();
+    //flair::core::Time ti = GetTime();
     uavVrpn->GetPosition(uav_pos);
     uavVrpn->GetSpeed(uav_vel);
     uavVrpn->GetQuaternion(uav_quat);
-    flair::core::Time  tf = GetTime()-ti;
+    //flair::core::Time  tf = GetTime()-ti;
 
     //Printf("pos: %f ms\n",  (float)tf/1000000);
 
@@ -673,12 +681,12 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     //Printf("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
     //Thread::Info("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
 
-    ti = GetTime();
+    //ti = GetTime();
     const AhrsData *currentOrientation = GetDefaultOrientation();
     Quaternion currentQuaternion;
     Vector3Df currentAngularRates;
     currentOrientation->GetQuaternionAndAngularRates(currentQuaternion, currentAngularRates);
-    tf = GetTime()-ti;
+    //tf = GetTime()-ti;
 
     //Printf("ori: %f ms\n",  (float)tf/1000000);
     
@@ -746,7 +754,7 @@ void ctrl1::sliding_ctrl_force(Euler &torques){
 
     force_reference(Fd, tactual);
     
-    u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,uav_quat,F,Fd);
+    u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion,F,Fd);
     
     u_sliding_force->Update(GetTime());
     
