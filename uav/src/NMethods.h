@@ -123,10 +123,27 @@ public:
     */
     Eigen::Vector3f Compute(const Eigen::Vector3f f, const float dt);
 
+    /*!
+    * \brief Get the error.
+    *
+    * \return Error
+    */
+    float getErr(void);
+
+    /*!
+    * \brief Get the error.
+    *
+    * \return Error
+    */
+    Eigen::Vector3f getErr_v(void);
+
 private:
     std::string mode;
     float alpha, lamb, p;
     float u, u1, u1p, x;
+
+    float err;
+    Eigen::Vector3f err_v;
 
     Eigen::Vector3f u_vec, u1_vec, u1p_vec, x_vec;
 

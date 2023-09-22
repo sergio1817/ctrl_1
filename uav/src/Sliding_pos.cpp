@@ -50,15 +50,15 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     desc->SetElementName(1, 0, "u_pitch");
     desc->SetElementName(2, 0, "u_yaw");
     desc->SetElementName(3, 0, "u_z");
-    desc->SetElementName(4, 0, "roll");
-    desc->SetElementName(5, 0, "pitch");
-    desc->SetElementName(6, 0, "yaw");
-    desc->SetElementName(7, 0, "nurp_x");
-    desc->SetElementName(8, 0, "nurp_y");
-    desc->SetElementName(9, 0, "nurp_z");
-    desc->SetElementName(10, 0, "nur_roll");
-    desc->SetElementName(11, 0, "nur_pitch");
-    desc->SetElementName(12, 0, "nur_yaw");
+    desc->SetElementName(4, 0, "roll_d");
+    desc->SetElementName(5, 0, "pitch_d");
+    desc->SetElementName(6, 0, "yaw_d");
+    desc->SetElementName(7, 0, "Sp_x");
+    desc->SetElementName(8, 0, "Sp_y");
+    desc->SetElementName(9, 0, "Sp_z");
+    desc->SetElementName(10, 0, "Sa_roll");
+    desc->SetElementName(11, 0, "Sa_pitch");
+    desc->SetElementName(12, 0, "Sa_yaw");
     state = new Matrix(this, desc, floatType, name);
     delete desc;
 
@@ -120,7 +120,7 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     sgnori_p << 0,0,0;
     sgnori << 0,0,0;
     
-    
+    AddDataToLog(state);
 }
 
 Sliding_pos::~Sliding_pos(void) {}

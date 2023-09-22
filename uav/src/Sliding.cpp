@@ -82,6 +82,8 @@ Sliding::Sliding(const LayoutPosition *position, string name): ControlLaw(positi
     
     m = new DoubleSpinBox(pdt->NewRow(),"m",0,2000,0.001,3);
     g = new DoubleSpinBox(pdt->LastRowLastCol(),"g",-10,10,0.01,3);
+
+    AddDataToLog(state);
     
     //GroupBox *c_fisicas = new GroupBox(position->NewRow(), "Constantes Fisicas");
     

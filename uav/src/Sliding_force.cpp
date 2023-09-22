@@ -50,15 +50,15 @@ Sliding_force::Sliding_force(const LayoutPosition *position, string name): Contr
     desc->SetElementName(1, 0, "u_pitch");
     desc->SetElementName(2, 0, "u_yaw");
     desc->SetElementName(3, 0, "u_z");
-    desc->SetElementName(4, 0, "roll");
-    desc->SetElementName(5, 0, "pitch");
-    desc->SetElementName(6, 0, "yaw");
-    desc->SetElementName(7, 0, "nup_x");
-    desc->SetElementName(8, 0, "nup_y");
-    desc->SetElementName(9, 0, "nup_z");
-    desc->SetElementName(10, 0, "nuq_roll");
-    desc->SetElementName(11, 0, "nuq_pitch");
-    desc->SetElementName(12, 0, "nuq_yaw");
+    desc->SetElementName(4, 0, "roll_d");
+    desc->SetElementName(5, 0, "pitch_d");
+    desc->SetElementName(6, 0, "yaw_d");
+    desc->SetElementName(7, 0, "Sp_x");
+    desc->SetElementName(8, 0, "Sp_y");
+    desc->SetElementName(9, 0, "Sp_z");
+    desc->SetElementName(10, 0, "Sa_roll");
+    desc->SetElementName(11, 0, "Sa_pitch");
+    desc->SetElementName(12, 0, "Sa_yaw");
     desc->SetElementName(13, 0, "Sf_x");
     desc->SetElementName(14, 0, "Svf_y");
     desc->SetElementName(15, 0, "Svf_z");
@@ -159,7 +159,7 @@ Sliding_force::Sliding_force(const LayoutPosition *position, string name): Contr
     sgnfx = 0;
     sgnfxp = 0;
     
-    
+    AddDataToLog(state);
 }
 
 Sliding_force::~Sliding_force(void) {}

@@ -104,6 +104,8 @@ float Levant_diff::Compute(const float f, const float dt){
     u1p = -alpha*sign_(x-f);
     x = rk4(function1d, x, u, dt);
     u1 = rk4(function1d, u1, u1p, dt);
+
+    err = x-f;
     return u;
 }
 
@@ -126,7 +128,17 @@ Eigen::Vector3f Levant_diff::Compute(const Eigen::Vector3f f, const float dt){
 
     x_vec = rk4_vec(x_vec, u_vec, dt);
     u1_vec = rk4_vec(u1_vec, u1p_vec, dt);
+
+    err_v = x_vec-f;
     return u_vec;
+}
+
+float Levant_diff::getErr(void){
+    return err;
+}
+
+Eigen::Vector3f Levant_diff::getErr_v(void){
+    return err_v;
 }
 
 float Levant_diff::sign_(const float a){
