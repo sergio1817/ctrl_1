@@ -82,7 +82,16 @@ public:
     void UseDefaultPlot12(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot13(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot14(const flair::gui::LayoutPosition *position);
-    
+    void UseDefaultPlot15(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot16(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot17(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot18(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot19(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot20(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot21(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot22(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot23(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot24(const flair::gui::LayoutPosition *position);
     
     flair::core::Time t0;
     float tactual;

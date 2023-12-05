@@ -45,7 +45,7 @@ Sliding_force::Sliding_force(const LayoutPosition *position, string name): Contr
     // init matrix
     input = new Matrix(this, 4, 10, floatType, name);
 
-    MatrixDescriptor *desc = new MatrixDescriptor(26, 1);
+    MatrixDescriptor *desc = new MatrixDescriptor(39, 1);
     desc->SetElementName(0, 0, "u_roll");
     desc->SetElementName(1, 0, "u_pitch");
     desc->SetElementName(2, 0, "u_yaw");
@@ -72,6 +72,19 @@ Sliding_force::Sliding_force(const LayoutPosition *position, string name): Contr
     desc->SetElementName(23, 0, "Fdy");
     desc->SetElementName(24, 0, "Fdz");
     desc->SetElementName(25, 0, "pitch_f");
+    desc->SetElementName(26, 0, "roll");
+    desc->SetElementName(27, 0, "pitch");
+    desc->SetElementName(28, 0, "yaw");
+    desc->SetElementName(29, 0, "tau_roll");
+    desc->SetElementName(30, 0, "tau_pitch");
+    desc->SetElementName(31, 0, "tau_yaw");
+    desc->SetElementName(32, 0, "u_x");
+    desc->SetElementName(33, 0, "u_y");
+    desc->SetElementName(34, 0, "u_z");
+    desc->SetElementName(35, 0, "T");
+    desc->SetElementName(36, 0, "Levant_err_x");
+    desc->SetElementName(37, 0, "Levant_err_y");
+    desc->SetElementName(38, 0, "Levant_err_z");
     state = new Matrix(this, desc, floatType, name);
     delete desc;
 
@@ -253,20 +266,23 @@ void Sliding_force::UseDefaultPlot4(const LayoutPosition *position) {
 
 void Sliding_force::UseDefaultPlot5(const LayoutPosition *position) {    
     DataPlot1D *r = new DataPlot1D(position, "r", -3.14, 3.14);
-    r->AddCurve(state->Element(4));
+    r->AddCurve(state->Element(26));
+    r->AddCurve(state->Element(4), DataPlot::Blue);
     
 }
 
 void Sliding_force::UseDefaultPlot6(const LayoutPosition *position) {    
     DataPlot1D *p = new DataPlot1D(position, "p", -3.14, 3.14);
-    p->AddCurve(state->Element(5));
+    p->AddCurve(state->Element(27));
+    p->AddCurve(state->Element(5), DataPlot::Blue);
     //p->AddCurve(state->Element(25), DataPlot::Blue);
     
 }
 
 void Sliding_force::UseDefaultPlot7(const LayoutPosition *position) {    
     DataPlot1D *y = new DataPlot1D(position, "y", -3.14, 3.14);
-    y->AddCurve(state->Element(6));
+    y->AddCurve(state->Element(28));
+    y->AddCurve(state->Element(6)),DataPlot::Blue;
     
 }
 
@@ -319,6 +335,49 @@ void Sliding_force::UseDefaultPlot14(const LayoutPosition *position) {
     Fz->AddCurve(state->Element(21), DataPlot::Black);
     Fz->AddCurve(state->Element(24), DataPlot::Blue);
 }
+
+void Sliding_force::UseDefaultPlot15(const LayoutPosition *position) {    
+    DataPlot1D *tau_roll = new DataPlot1D(position, "tau_roll", -5, 5);
+    tau_roll->AddCurve(state->Element(29), DataPlot::Black);
+}
+
+void Sliding_force::UseDefaultPlot16(const LayoutPosition *position) {    
+    DataPlot1D *tau_pitch = new DataPlot1D(position, "tau_pitch", -5, 5);
+    tau_pitch->AddCurve(state->Element(30), DataPlot::Black);
+}
+
+void Sliding_force::UseDefaultPlot17(const LayoutPosition *position) {    
+    DataPlot1D *tau_yaw = new DataPlot1D(position, "tau_yaw", -5, 5);
+    tau_yaw->AddCurve(state->Element(31), DataPlot::Black);
+}
+
+void Sliding_force::UseDefaultPlot18(const LayoutPosition *position) {    
+    DataPlot1D *u_x = new DataPlot1D(position, "u_x", -5, 5);
+    u_x->AddCurve(state->Element(32), DataPlot::Black);
+}
+
+void Sliding_force::UseDefaultPlot19(const LayoutPosition *position) {    
+    DataPlot1D *u_y = new DataPlot1D(position, "u_y", -5, 5);
+    u_y->AddCurve(state->Element(33), DataPlot::Black);
+}
+
+void Sliding_force::UseDefaultPlot20(const LayoutPosition *position) {    
+    DataPlot1D *u_z = new DataPlot1D(position, "u_z", -5, 5);
+    u_z->AddCurve(state->Element(34), DataPlot::Black);
+}
+
+void Sliding_force::UseDefaultPlot21(const LayoutPosition *position) {    
+    DataPlot1D *T = new DataPlot1D(position, "T", -10, 10);
+    T->AddCurve(state->Element(35), DataPlot::Black);
+}
+
+void Sliding_force::UseDefaultPlot22(const LayoutPosition *position) {    
+    DataPlot1D *Levant_err = new DataPlot1D(position, "Levant_err", -1, 1);
+    Levant_err->AddCurve(state->Element(36), DataPlot::Black);
+    Levant_err->AddCurve(state->Element(37), DataPlot::Blue);
+    Levant_err->AddCurve(state->Element(38), DataPlot::Red);
+}
+
 
 
 void Sliding_force::UpdateFrom(const io_data *data) {
@@ -425,6 +484,12 @@ void Sliding_force::UpdateFrom(const io_data *data) {
     state->SetValueNoMutex(23, 0, Fd(1));
     state->SetValueNoMutex(24, 0, Fd(2));
     //state->SetValueNoMutex(25, 0, pitchd);
+    state->SetValueNoMutex(26, 0, eta.roll);
+    state->SetValueNoMutex(27, 0, eta.pitch);
+    state->SetValueNoMutex(28, 0, eta.yaw);
+    state->SetValueNoMutex(29, 0, tau(0));
+    state->SetValueNoMutex(30, 0, tau(1));
+    state->SetValueNoMutex(31, 0, tau(2));
     state->ReleaseMutex();
 
 
@@ -504,7 +569,7 @@ void Sliding_force::ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, f
 
     Eigen::Vector3f dFi(dFi_,0,0);
 
-    std::cout << "dFi: \n" << dFi << std::endl;
+    //std::cout << "dFi: \n" << dFi << std::endl;
 
     dLamb(0) = F(1)-Fd(1);
     dLamb(1) = F(2)-Fd(2);
@@ -516,7 +581,7 @@ void Sliding_force::ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, f
 
     //Sf = dLamb;
 
-    std::cout << "Sf: \n" << Sf << std::endl;
+    //std::cout << "Sf: \n" << Sf << std::endl;
 
     Eigen::Vector2f Sdf0 = 0.0*Eigen::Vector2f(1,1);
 
@@ -556,6 +621,8 @@ void Sliding_force::ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, f
     levant.setParam(alpha_l->Value(), lamb_l->Value());
     Eigen::Vector3f up = levant.Compute(u,delta_t);
 
+    Eigen::Vector3f err = levant.getErr_v();
+
     Eigen::Vector3f un = u.normalized();
     Eigen::Vector3f upn = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
 
@@ -584,6 +651,13 @@ void Sliding_force::ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, f
     state->SetValueNoMutex(16, 0, Sr(0));
     state->SetValueNoMutex(17, 0, Sr(1));
     state->SetValueNoMutex(18, 0, Sr(2));
+    state->SetValueNoMutex(32, 0, u(0));
+    state->SetValueNoMutex(33, 0, u(1));
+    state->SetValueNoMutex(34, 0, u(2));
+    state->SetValueNoMutex(35, 0, Trs);
+    state->SetValueNoMutex(36, 0, err(0));
+    state->SetValueNoMutex(37, 0, err(1));
+    state->SetValueNoMutex(38, 0, err(2));
     state->ReleaseMutex();
 
 }

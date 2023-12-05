@@ -196,6 +196,7 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     Tab *setupForceTab = new Tab(tabWidget3, "Setup");
     Tab *slidingTab = new Tab(tabWidget3, "Sliding");
     Tab *errorsTab = new Tab(tabWidget3, "Graphs");
+    Tab *ctrlfTab = new Tab(tabWidget3, "Control");
     Tab *outputTab = new Tab(tabWidget3, "Outputs");
 
     Tab *ref = new Tab(tabWidget3, "Reference force");
@@ -229,9 +230,9 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     GroupBox *fykbox = new GroupBox(trackboxf->LastRowLastCol(), "fyd");
     GroupBox *fzkbox = new GroupBox(trackboxf->LastRowLastCol(), "fzd");
     
-    fxd = new DoubleSpinBox(regboxf->NewRow(), "fx", " N", -2, 2, 0.1, 2);
-    fyd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fy", " N", -2, 2, 0.1, 2);
-    fzd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fz", " N", -2, 2, 0.1, 2);
+    fxd = new DoubleSpinBox(regboxf->NewRow(), "fx", " N", -10, 10, 0.1, 2);
+    fyd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fy", " N", -10, 10, 0.1, 2);
+    fzd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fz", " N", -10, 10, 0.1, 2);
     
     lfx = new Label(fxkbox->NewRow(), "funcion");
     lfx->SetText("a*fnc(w*t) + b");
@@ -269,6 +270,18 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     u_sliding_force->UseDefaultPlot12(errorsTab->At(0, 0));
     u_sliding_force->UseDefaultPlot13(errorsTab->At(0, 1));
     u_sliding_force->UseDefaultPlot14(errorsTab->At(0, 2));
+
+    u_sliding_force->UseDefaultPlot15(ctrlfTab->At(0, 0));
+    u_sliding_force->UseDefaultPlot16(ctrlfTab->At(0, 1));
+    u_sliding_force->UseDefaultPlot17(ctrlfTab->At(0, 2));
+
+    u_sliding_force->UseDefaultPlot18(ctrlfTab->At(1, 0));
+    u_sliding_force->UseDefaultPlot19(ctrlfTab->At(1, 1));
+    u_sliding_force->UseDefaultPlot20(ctrlfTab->At(1, 2));
+
+    u_sliding_force->UseDefaultPlot22(ctrlfTab->At(2, 0));
+    u_sliding_force->UseDefaultPlot21(ctrlfTab->At(2, 2));
+
 
     //getFrameworkManager()->AddDeviceToLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding);
