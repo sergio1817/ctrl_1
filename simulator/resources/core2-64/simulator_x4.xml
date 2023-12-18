@@ -26,7 +26,7 @@
     <DoubleSpinBox value="0.006" name="j_roll:"/>
     <DoubleSpinBox value="0.006" name="j_pitch:"/>
     <DoubleSpinBox value="0.1" name="j_yaw:"/>
-   <SpinBox name="motor timeout:" value="100"/></Tab>
+   <SpinBox name="motor timeout:" value="100"/><DoubleSpinBox name="mass:" value="0.436"/><DoubleSpinBox name="arm length:" value="0.1745"/></Tab>
    <Tab name="us">
     <GroupBox name="position">
      <DoubleSpinBox value="0" name="x:"/>
@@ -96,7 +96,7 @@
    <Tab name="model">
     <DoubleSpinBox value="1.3" name="translational speed (m/s):"/>
     <DoubleSpinBox value="60" name="rotational speed (deg/s):"/>
-   </Tab>
+   <DoubleSpinBox name="mass:" value="0"/></Tab>
   </TabWidget>
 </Tab>
   </TabWidget>
