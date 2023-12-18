@@ -54,7 +54,7 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
     if(uav->GetType()=="x4_simu"){
         ip_dir = uav->GetDefaultVrpnAddress();
     } else {
-        ip_dir = "192.168.147.103:3883";
+        ip_dir = "192.168.147.100:3883";
     }
     //ip_dir = "192.168.147.103:3883";
     VrpnClient* vrpnclient=new VrpnClient("vrpn", ip_dir,80,uav->GetDefaultVrpnConnectionType());
