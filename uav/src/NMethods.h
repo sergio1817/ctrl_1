@@ -89,6 +89,15 @@ public:
     void setParam(const float alpha, const float lamb);
 
     /*!
+    * \brief Set the parameters of the Levant's derivative.
+    * 
+    * \param alpha Parameter of Levant's derivative
+    * \param lamb  Parameter of Levant's derivative
+    * 
+    */
+    void setParam_vec(const Eigen::Vector3f alpha, const Eigen::Vector3f lamb);
+
+    /*!
     * \brief Reset.
     */
     void Reset(void);
@@ -141,6 +150,8 @@ private:
     std::string mode;
     float alpha, lamb, p;
     float u, u1, u1p, x;
+
+    Eigen::Vector3f alpha_vec, lamb_vec;
 
     float err;
     Eigen::Vector3f err_v;

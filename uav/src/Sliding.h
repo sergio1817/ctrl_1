@@ -47,6 +47,7 @@ namespace flair {
     
     
 public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     Sliding(const flair::gui::LayoutPosition *position, std::string name);
     ~Sliding();
     void UpdateFrom(const flair::core::io_data *data);

@@ -48,6 +48,7 @@ namespace flair {
     
     
 public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     Sliding_force(const flair::gui::LayoutPosition *position, std::string name);
     ~Sliding_force();
     void UpdateFrom(const flair::core::io_data *data);
@@ -103,12 +104,12 @@ private:
     float sech(float value);
 
     flair::gui::CheckBox *levantd;
-    flair::gui::DoubleSpinBox *T, *gamma, *k, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p, *km_z;
+    flair::gui::DoubleSpinBox *T, *gamma, *k, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p, *km_z, *mu_t;
     flair::gui::DoubleSpinBox *gamma_roll, *gamma_pitch, *gamma_yaw, *gamma_x, *gamma_y, *gamma_z;
     flair::gui::DoubleSpinBox *alpha_roll, *alpha_pitch, *alpha_yaw, *alpha_x, *alpha_y, *alpha_z;
     flair::gui::DoubleSpinBox *Kd_roll, *Kd_pitch, *Kd_yaw, *Kd_x, *Kd_y, *Kd_z;
     flair::gui::DoubleSpinBox *Kp_roll, *Kp_pitch, *Kp_yaw, *Kp_x, *Kp_y, *Kp_z;
-    flair::gui::DoubleSpinBox *alpha_l,*lamb_l;
+    flair::gui::DoubleSpinBox *alpha_l1, *alpha_l2, *alpha_l3, *lamb_l1, *lamb_l2, *lamb_l3;
     flair::gui::DoubleSpinBox *gamma_fx, *gamma_fy, *gamma_fz, *beta_1, *beta_2, *eta_1, *eta_2, *muf, *mup, *kf, *kf_x, *alpha_fx, *alphapf1;
 
     flair::gui::Label *lo, *lp;
