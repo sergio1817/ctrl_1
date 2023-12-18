@@ -128,10 +128,10 @@ private:
 
     Eigen::Matrix3f I = Eigen::Matrix3f::Identity(3,3);
 
-    void Position(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, float &Trs, const Eigen::Vector3f xie, const Eigen::Vector3f xiep, const Eigen::Vector3f xid,
+    void Position(Eigen::Vector3f &u, const Eigen::Vector3f xie, const Eigen::Vector3f xiep, const Eigen::Vector3f xid,
                             const Eigen::Vector3f xidpp, const Eigen::Vector3f xidppp, const Eigen::Quaternionf q);
     
-    void ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, float &Trs, const Eigen::Vector3f xie, const Eigen::Vector3f xiep, const Eigen::Vector3f xid,
+    void ForcePosition(Eigen::Vector3f &u, const Eigen::Vector3f xie, const Eigen::Vector3f xiep, const Eigen::Vector3f xid,
                             const Eigen::Vector3f xidpp, const Eigen::Vector3f xidppp, const Eigen::Quaternionf q, const Eigen::Vector3f F, const Eigen::Vector3f Fd);
 
     void Orientation(Eigen::Vector3f &tau, const Eigen::Quaternionf qd, const Eigen::Vector3f wd, const Eigen::Quaternionf q, const Eigen::Vector3f w);

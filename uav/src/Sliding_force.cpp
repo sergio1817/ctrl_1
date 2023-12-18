@@ -422,14 +422,51 @@ void Sliding_force::UpdateFrom(const io_data *data) {
     
     input->ReleaseMutex();
 
+    Eigen::Vector3f u_p;
+    Eigen::Vector3f u;
+
+    Eigen::Vector3f u_f;
+
     Eigen::Quaternionf qd;
     Eigen::Vector3f wd;
 
     // std::cout << "F: " << F << std::endl;
     // std::cout << "Fd: " << Fd << std::endl;
 
-    //Position(qd,wd,Trs,xie,xiep,xid,xidpp,xidppp,q);
-    ForcePosition(qd,wd,Trs,xie,xiep,xid,xidpp,xidppp,q,F,Fd);
+    Position(u_p,xie,xiep,xid,xidpp,xidppp,q);
+    ForcePosition(u_f,xie,xiep,xid,xidpp,xidppp,q,F,Fd);
+
+    float psi = tanhf(F.norm());
+
+    u = 0.5*psi*u_f + (1-0.5*psi)*u_p;
+
+    float Trs = u.norm();
+
+    levant.setParam(alpha_l->Value(), lamb_l->Value());
+    Eigen::Vector3f up = levant.Compute(u,delta_t);
+
+    Eigen::Vector3f err = levant.getErr_v();
+
+    Eigen::Vector3f un = u.normalized();
+    Eigen::Vector3f upn = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
+
+
+    Eigen::Vector3f uh = u.normalized();
+    Eigen::Vector3f uph = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
+
+
+    qd = Eigen::Quaternionf( (0.5)*sqrtf(-2*uh(2)+2) , uh(1)/sqrtf(-2*uh(2)+2), -uh(0)/sqrtf(-2*uh(2)+2), 0);
+
+    // Eigen::Quaternionf qdp(-(0.5)*(uph(2)/sqrtf(-2*uh(2)+2)),
+    //                         (uph(1)/sqrtf(-2*uh(2)+2)) + ((uh(1)*uph(2))/powf(-2*uh(2)+2,1.5)),
+    //                         -(uph(0)/sqrtf(-2*uh(2)+2)) - ((uh(0)*uph(2))/powf(-2*uh(2)+2,1.5)),
+    //                         0);
+    
+    //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
+
+    wd << (uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ),  -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
+
+
     
     Quaternion qd2 = Quaternion(qd.w(),qd.x(),qd.y(),qd.z());
     Euler etad = qd2.ToEuler();
@@ -484,6 +521,7 @@ void Sliding_force::UpdateFrom(const io_data *data) {
     state->SetValueNoMutex(23, 0, Fd(1));
     state->SetValueNoMutex(24, 0, Fd(2));
     //state->SetValueNoMutex(25, 0, pitchd);
+    state->SetValueNoMutex(35, 0, Trs);
     state->SetValueNoMutex(26, 0, eta.roll);
     state->SetValueNoMutex(27, 0, eta.pitch);
     state->SetValueNoMutex(28, 0, eta.yaw);
@@ -522,8 +560,12 @@ void Sliding_force::UpdateFrom(const io_data *data) {
 
 // }
 
-void Sliding_force::ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, float &Trs, const Eigen::Vector3f xie, const Eigen::Vector3f xiep, const Eigen::Vector3f xid,
+void Sliding_force::ForcePosition(Eigen::Vector3f &u, const Eigen::Vector3f xie, const Eigen::Vector3f xiep, const Eigen::Vector3f xid,
                             const Eigen::Vector3f xidpp, const Eigen::Vector3f xidppp, const Eigen::Quaternionf q, const Eigen::Vector3f F, const Eigen::Vector3f Fd){
+
+    // Eigen::Quaternionf qd;
+    // Eigen::Vector3f wd;
+    // float Trs;
 
     Eigen::Vector2f gammaf_v(gamma_fy->Value(), gamma_fz->Value());
     Eigen::Matrix2f gammaf = gammaf_v.asDiagonal();
@@ -614,20 +656,20 @@ void Sliding_force::ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, f
 
     Eigen::Vector3f Sr = Q*nurp - Jphi_xi_pinv*beta*Svf;
 
-    Eigen::Vector3f u = -Kpm*Sr + Jphi_xi_pinv*(-lambd + Sdfp + gammaf*sgnfp + eta*Svf) - m->Value()*g->Value()*ez; //+ m->Value()*xirpp
+    u = -Kpm*Sr + Jphi_xi_pinv*(-lambd + Sdfp + gammaf*sgnfp + eta*Svf) - m->Value()*g->Value()*ez; //+ m->Value()*xirpp
 
-    Trs = u.norm();
+    //Trs = u.norm();
 
-    levant.setParam(alpha_l->Value(), lamb_l->Value());
-    Eigen::Vector3f up = levant.Compute(u,delta_t);
+    // levant.setParam(alpha_l->Value(), lamb_l->Value());
+    // Eigen::Vector3f up = levant.Compute(u,delta_t);
 
-    Eigen::Vector3f err = levant.getErr_v();
+    // Eigen::Vector3f err = levant.getErr_v();
 
-    Eigen::Vector3f un = u.normalized();
-    Eigen::Vector3f upn = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
+    // Eigen::Vector3f un = u.normalized();
+    // Eigen::Vector3f upn = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
 
 
-    qd = Eigen::Quaternionf( (0.5)*sqrtf(-2*un(2)+2) , un(1)/sqrtf(-2*un(2)+2), -un(0)/sqrtf(-2*un(2)+2), 0);
+    //qd = Eigen::Quaternionf( (0.5)*sqrtf(-2*un(2)+2) , un(1)/sqrtf(-2*un(2)+2), -un(0)/sqrtf(-2*un(2)+2), 0);
 
     // Eigen::Quaternionf qdp(-(0.5)*(upn(2)/sqrtf(-2*un(2)+2)),
     //                         (upn(1)/sqrtf(-2*un(2)+2)) + ((un(1)*upn(2))/powf(-2*un(2)+2,1.5)),
@@ -636,7 +678,7 @@ void Sliding_force::ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, f
     
     //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
 
-    wd << upn(1) - ( (un(1)*upn(2))/(1-un(2)) ), -upn(0) + ( (un(0)*upn(2))/(1-un(2)) ),  (un(1)*upn(0) - un(0)*upn(1))/(1-un(2));
+    //wd << upn(1) - ( (un(1)*upn(2))/(1-un(2)) ), -upn(0) + ( (un(0)*upn(2))/(1-un(2)) ),  (un(1)*upn(0) - un(0)*upn(1))/(1-un(2));
 
     flair::core::Time dt_pos = GetTime() - t0_p;
 
@@ -654,96 +696,86 @@ void Sliding_force::ForcePosition(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, f
     state->SetValueNoMutex(32, 0, u(0));
     state->SetValueNoMutex(33, 0, u(1));
     state->SetValueNoMutex(34, 0, u(2));
-    state->SetValueNoMutex(35, 0, Trs);
-    state->SetValueNoMutex(36, 0, err(0));
-    state->SetValueNoMutex(37, 0, err(1));
-    state->SetValueNoMutex(38, 0, err(2));
+    //state->SetValueNoMutex(35, 0, Trs);
+    // state->SetValueNoMutex(36, 0, err(0));
+    // state->SetValueNoMutex(37, 0, err(1));
+    // state->SetValueNoMutex(38, 0, err(2));
     state->ReleaseMutex();
 
 }
 
 
-// void Sliding_force::Position(Eigen::Quaternionf &qd, Eigen::Vector3f &wd, float &Trs, const Eigen::Vector3f xie, const Eigen::Vector3f xiep, const Eigen::Vector3f xid,
-//                             const Eigen::Vector3f xidpp, const Eigen::Vector3f xidppp, const Eigen::Quaternionf q){
+void Sliding_force::Position(Eigen::Vector3f &u, const Eigen::Vector3f xie, const Eigen::Vector3f xiep, const Eigen::Vector3f xid,
+                            const Eigen::Vector3f xidpp, const Eigen::Vector3f xidppp, const Eigen::Quaternionf q){
     
-//     Eigen::Vector3f ez(0,0,1);
+    Eigen::Quaternionf qd;
+    Eigen::Vector3f wd;
+    float Trs;
+
+    Eigen::Vector3f ez(0,0,1);
     
-//     //Eigen::Vector3f alphap_v(alpha_x->Value(), alpha_y->Value(), alpha_z->Value());
-//     Eigen::Matrix3f alphap = Eigen::Vector3f(alpha_x->Value(), alpha_y->Value(), alpha_z->Value()).asDiagonal();
+    //Eigen::Vector3f alphap_v(alpha_x->Value(), alpha_y->Value(), alpha_z->Value());
+    Eigen::Matrix3f alphap = Eigen::Vector3f(alpha_x->Value(), alpha_y->Value(), alpha_z->Value()).asDiagonal();
 
-//     //Eigen::Vector3f gammap_v(gamma_x->Value(), gamma_y->Value(), gamma_z->Value());
-//     Eigen::Matrix3f gammap = Eigen::Vector3f(gamma_x->Value(), gamma_y->Value(), gamma_z->Value()).asDiagonal();
+    //Eigen::Vector3f gammap_v(gamma_x->Value(), gamma_y->Value(), gamma_z->Value());
+    Eigen::Matrix3f gammap = Eigen::Vector3f(gamma_x->Value(), gamma_y->Value(), gamma_z->Value()).asDiagonal();
 
-//     //Eigen::Vector3f Kpv(Kp_x->Value(), Kp_y->Value(), Kp_z->Value());
-//     Eigen::Matrix3f Kpm = Eigen::Vector3f(Kp_x->Value(), Kp_y->Value(), Kp_z->Value()).asDiagonal();
+    //Eigen::Vector3f Kpv(Kp_x->Value(), Kp_y->Value(), Kp_z->Value());
+    Eigen::Matrix3f Kpm = Eigen::Vector3f(Kp_x->Value(), Kp_y->Value(), Kp_z->Value()).asDiagonal();
 
-//     flair::core::Time t0_p = GetTime();
+    flair::core::Time t0_p = GetTime();
 
-//     Eigen::Vector3f nup = xiep + alphap*xie;
+    Eigen::Vector3f nup = xiep + alphap*xie;
 
-//     sgnpos_p = signth(nup,1);
-//     sgnpos = rk4_vec(sgnpos, sgnpos_p, delta_t);
+    sgnpos_p = signth(nup,1);
+    sgnpos = rk4_vec(sgnpos, sgnpos_p, delta_t);
 
-//     Eigen::Vector3f nurp = nup + gammap*sgnpos;
+    Eigen::Vector3f nurp = nup + gammap*sgnpos;
 
-//     Eigen::Vector3f xirpp = xidpp - alphap*xiep - gammap*sgnpos_p;
+    Eigen::Vector3f xirpp = xidpp - alphap*xiep - gammap*sgnpos_p;
 
 
-//     Eigen::Vector3f u = -Kpm*nurp - m->Value()*g->Value()*ez + m->Value()*xirpp; //- m->Value()*g->Value()*ez + m->Value()*xirpp
+    u = -Kpm*nurp - m->Value()*g->Value()*ez + m->Value()*xirpp; //- m->Value()*g->Value()*ez + m->Value()*xirpp
 
-//     Trs = u.norm();
+    //Trs = u.norm();
 
-//     Eigen::Vector3f Qe3 = q.toRotationMatrix()*ez;
+    //Eigen::Vector3f Qe3 = q.toRotationMatrix()*ez;
     
-//     Eigen::Vector3f Lambpv(powf(sech(nup(0)*1),2), powf(sech(nup(1)*1),2), powf(sech(nup(2)*1),2) );
-//     Eigen::Matrix3f Lambp = Lambpv.asDiagonal();
+    //Eigen::Vector3f Lambpv(powf(sech(nup(0)*1),2), powf(sech(nup(1)*1),2), powf(sech(nup(2)*1),2) );
+    //Eigen::Matrix3f Lambp = Lambpv.asDiagonal();
 
-//     Eigen::Vector3f vec(sin(tactual), sin(tactual), sin(tactual));
+    //Eigen::Vector3f vec(sin(tactual), sin(tactual), sin(tactual));
 
-//     // float f = gammap->Value()*sin(alphap->Value()*tactual);
-//     // float alpha2 = Kp->Value();
-//     // float lamb = Kd->Value();
+    // float f = gammap->Value()*sin(alphap->Value()*tactual);
+    // float alpha2 = Kp->Value();
+    // float lamb = Kd->Value();
 
     
 
-//     //ud = levant.Compute(f,delta_t);
+    //ud = levant.Compute(f,delta_t);
 
-//     Eigen::Vector3f up;
-//     Eigen::Vector3f ud;
-//     if(levantd->IsChecked()){
-//         levant.setParam(alpha_l->Value(), lamb_l->Value());
-//         ud = levant.Compute(vec,delta_t);
-//     }else{
-//         up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 
-//                         -alphap*(Kpm+m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
-//     }
+    //Eigen::Vector3f up;
+    //Eigen::Vector3f ud;
+    // if(levantd->IsChecked()){
+    //     levant.setParam(alpha_l->Value(), lamb_l->Value());
+    //     up = levant.Compute(vec,delta_t);
+    // }else{
+    //     up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 
+    //                     -alphap*(Kpm+m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
+    // }
 
-//     Eigen::Vector3f uh = u.normalized();
-//     Eigen::Vector3f uph = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
-
-
-//     qd = Eigen::Quaternionf( (0.5)*sqrtf(-2*uh(2)+2) , uh(1)/sqrtf(-2*uh(2)+2), -uh(0)/sqrtf(-2*uh(2)+2), 0);
-
-//     // Eigen::Quaternionf qdp(-(0.5)*(uph(2)/sqrtf(-2*uh(2)+2)),
-//     //                         (uph(1)/sqrtf(-2*uh(2)+2)) + ((uh(1)*uph(2))/powf(-2*uh(2)+2,1.5)),
-//     //                         -(uph(0)/sqrtf(-2*uh(2)+2)) - ((uh(0)*uph(2))/powf(-2*uh(2)+2,1.5)),
-//     //                         0);
     
-//     //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
+    flair::core::Time dt_pos = GetTime() - t0_p;
 
-//     wd << (uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ),  -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
+    lp->SetText("Latecia pos: %.3f ms",(float)dt_pos/1000000);
 
-//     flair::core::Time dt_pos = GetTime() - t0_p;
-
-//     lp->SetText("Latecia pos: %.3f ms",(float)dt_pos/1000000);
-
-//     state->GetMutex();
-//     state->SetValueNoMutex(7, 0, nup.x());
-//     state->SetValueNoMutex(8, 0, nup.y());
-//     state->SetValueNoMutex(9, 0, nup.z());
-//     state->ReleaseMutex();
+    state->GetMutex();
+    state->SetValueNoMutex(7, 0, nup.x());
+    state->SetValueNoMutex(8, 0, nup.y());
+    state->SetValueNoMutex(9, 0, nup.z());
+    state->ReleaseMutex();
     
-// } 
+} 
 
 void Sliding_force::Orientation(Eigen::Vector3f &tau, const Eigen::Quaternionf qd, const Eigen::Vector3f wd, const Eigen::Quaternionf q, const Eigen::Vector3f w){
     //Eigen::Vector3f alphao_v(alpha_roll->Value(), alpha_pitch->Value(), alpha_yaw->Value());
