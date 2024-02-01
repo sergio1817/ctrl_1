@@ -16,12 +16,12 @@
                 <GroupBox name="Controles">
                     <PushButton name="start control" value="0"/>
                     <PushButton name="stop control" value="0"/>
-                    <ComboBox name="select control" value="0"/>
+                    <ComboBox name="select control" value="2"/>
                     <Label name="Control selec"/>
                 </GroupBox>
-            </GridLayout>
+            <PushButton name="quit program"/></GridLayout>
             <GroupBox name="takeoff/landing">
-                <DoubleSpinBox name="desired takeoff altitude" value="1"/>
+                <DoubleSpinBox name="desired takeoff altitude" value="1.2"/>
                 <DoubleSpinBox name="desired landing altitude" value="0"/>
             </GroupBox>
             <GroupBox name="alt cons">
@@ -52,7 +52,7 @@
                         <PushButton value="0" name="test motor 1"/>
                         <PushButton value="0" name="test motor 2"/>
                         <PushButton value="0" name="test motor 3"/>
-                    </GroupBox>
+                    <SpinBox name="test duration:" value="2"/><PushButton name="test selected motors"/><CheckBox name="0" value="1"/><CheckBox name="1" value="1"/><CheckBox name="2" value="1"/><CheckBox name="3" value="1"/></GroupBox>
                     <DoubleSpinBox name="permanent trim roll" value="0"/>
                     <DoubleSpinBox name="permanent trim pitch" value="0"/>
                 </Tab>
@@ -100,7 +100,7 @@
                     </GroupBox>
                 </Tab>
                 <Tab name="Mesures">
-                    <DataPlot1D name="parrot-us" period="100" enabled="1" nb_buf="1">
+                    <DataPlot1D name="parrot-us" period="100" enabled="0" nb_buf="1">
                         <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="vz" period="100" enabled="1" nb_buf="1">
@@ -226,22 +226,79 @@
             </GroupBox>
         </Tab>
 
+        <Tab name="simu_cam_v">
+            <TabWidget name="simu_cam_v">
+                <Tab name="Setup">
+                    <GroupBox name="simu_cam_v">
+                        <SpinBox value="50" name="data rate"/>
+                    </GroupBox>
+                    <GridLayout name="setup"/>
+                </Tab>
+            </TabWidget>
+        </Tab>
+
+        <Tab name="simu_cam_h">
+            <TabWidget name="simu_cam_h">
+                <Tab name="Setup">
+                    <GroupBox name="simu_cam_h"/>
+                    <GridLayout name="setup"/>
+                </Tab>
+            </TabWidget>
+        </Tab>
+
+        <Tab name="Dualshock3">
+            <TabWidget name="Dualshock3">
+                <Tab name="Reglages">
+                    <GroupBox name="Dualshock3">
+                        <SpinBox value="10" name="dead zone:"/>
+                        <Label name="batterie"/>
+                    </GroupBox>
+                    <GroupBox name="consignes joy">
+                        <DoubleSpinBox value="-20" name="debattement roll"/>
+                        <DoubleSpinBox value="-20" name="debattement pitch"/>
+                        <DoubleSpinBox value="90" name="debattement wz"/>
+                        <DoubleSpinBox value="-0.7" name="debattement dz"/>
+                        <DoubleSpinBox value="0" name="trim"/>
+                        <Label name="trim roll"/>
+                        <PushButton value="0" name="reset roll trim"/>
+                        <Label name="trim pitch"/>
+                        <PushButton value="0" name="reset pitch trim"/>
+                        <DoubleSpinBox name="debattement wz" value="90"/>
+                    </GroupBox>
+                </Tab>
+                <Tab name="Mesures">
+                    <DataPlot1D name="roll">
+                        <Setup period="100" enabled="1"/>
+                    </DataPlot1D>
+                    <DataPlot1D name="pitch">
+                        <Setup period="100" enabled="1"/>
+                    </DataPlot1D>
+                    <DataPlot1D name="yaw">
+                        <Setup period="100" enabled="1"/>
+                    </DataPlot1D>
+                    <DataPlot1D name="gaz">
+                        <Setup period="100" enabled="1"/>
+                    </DataPlot1D>
+                </Tab>
+            </TabWidget>
+        </Tab>
+
         <Tab name="vrpn">
             <TabWidget name="vrpn">
                 <Tab name="Reglages">
                     <GroupBox name="post rotation 1">
                         <DoubleSpinBox value="90" name="value"/>
-                        <ComboBox value="1" name="axis"/>
-                    </GroupBox>
-                    <GroupBox name="post rotation 2">
-                        <DoubleSpinBox value="90" name="value"/>
                         <ComboBox value="0" name="axis"/>
                     </GroupBox>
-                    <GroupBox name="Drone_0 Passe bas">
+                    <GroupBox name="post rotation 2">
+                        <DoubleSpinBox value="-90" name="value"/>
+                        <ComboBox value="2" name="axis"/>
+                    </GroupBox>
+                    <GroupBox name="x4_0 Passe bas">
                         <DoubleSpinBox value="0" name="period, 0 for auto"/>
                         <DoubleSpinBox value="2" name="cutoff frequency"/>
                     </GroupBox>
-                    <GroupBox name="Drone_0_euler">
+                    <GroupBox name="x4_0_euler">
                         <DoubleSpinBox value="0" name="period, 0 for auto:"/>
                     <DoubleSpinBox name="saturation, -1 to disable:" value="-1"/></GroupBox>
                     <GroupBox name="target Passe bas">
@@ -253,12 +310,12 @@
                     <DoubleSpinBox name="saturation, -1 to disable:" value="-1"/></GroupBox>
                     <GroupBox name="circle">
                         <DoubleSpinBox value="0" name="period, 0 for auto"/>
-                        <DoubleSpinBox value="1" name="R"/>
-                        <DoubleSpinBox value="0.5" name="velocity"/>
+                        <DoubleSpinBox value="1.5" name="R"/>
+                        <DoubleSpinBox value="1" name="velocity"/>
                         <DoubleSpinBox value="0.1" name="acceleration (absolute)"/>
                     </GroupBox>
-                </Tab>
-                <Tab name="Mesures Drone_0">
+                <GroupBox name="Drone_0 Passe bas"><DoubleSpinBox name="period, 0 for auto" value="0"/><DoubleSpinBox name="cutoff frequency" value="1"/></GroupBox><GroupBox name="Drone_0_euler"><DoubleSpinBox name="period, 0 for auto:" value="0"/><DoubleSpinBox name="saturation, -1 to disable:" value="-1"/></GroupBox></Tab>
+                <Tab name="Mesures x4_0">
                     <DataPlot1D name="x" period="100" enabled="1" nb_buf="1">
                         <Setup period="100" enabled="1"/>
                     </DataPlot1D>
@@ -269,35 +326,35 @@
                         <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="vx" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="vy" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="vz" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                 </Tab>
-                <Tab name="Mesures (xy) Drone_0">
-                    <DataPlot2D name="xy" period="100" enabled="0" nb_buf="1">
+                <Tab name="Mesures (xy) x4_0">
+                    <DataPlot2D name="xy" period="100" enabled="1" nb_buf="1">
                         <Setup period="100" enabled="1"/>
                     </DataPlot2D>
                 </Tab>
                 <Tab name="Mesures target">
                     <DataPlot1D name="x" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="y" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="z" period="100" enabled="0" nb_buf="1">
                         <Setup period="100" enabled="0"/>
                     </DataPlot1D>
                     <DataPlot1D name="vx" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="vy" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="vz" period="100" enabled="0" nb_buf="1">
                         <Setup period="100" enabled="0"/>
@@ -305,70 +362,10 @@
                 </Tab>
                 <Tab name="Mesures (xy) target">
                     <DataPlot2D name="xy" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot2D>
                 </Tab>
-            </TabWidget>
-        </Tab>
-
-        <Tab name="camv">
-            <TabWidget name="camv">
-                <Tab name="Setup">
-                    <GroupBox name="camv">
-                        <DoubleSpinBox value="0" name="gain:"/>
-                        <DoubleSpinBox value="0" name="exposure:"/>
-                        <DoubleSpinBox value="0" name="bright:"/>
-                        <DoubleSpinBox value="0" name="contrast:"/>
-                        <DoubleSpinBox value="0" name="hue:"/>
-                        <DoubleSpinBox value="0" name="sharpness:"/>
-                        <DoubleSpinBox value="0" name="saturation:"/>
-                        <CheckBox value="1" name="autogain:"/>
-                        <CheckBox value="1" name="autoexposure:"/>
-                        <CheckBox value="1" name="awb:"/>
-                        <Label name="fps"/>
-                    </GroupBox>
-                    <GridLayout name="setup"/>
-                </Tab>
-            </TabWidget>
-        </Tab>
-
-        <Tab name="camh">
-            <TabWidget name="camh">
-                <Tab name="Setup">
-                    <GroupBox name="camh">
-                        <DoubleSpinBox name="gain:" value="0"/>
-                        <DoubleSpinBox name="exposure:" value="0"/>
-                        <DoubleSpinBox name="bright:" value="0"/>
-                        <DoubleSpinBox name="contrast:" value="0"/>
-                        <DoubleSpinBox name="hue:" value="0"/>
-                        <DoubleSpinBox name="sharpness:" value="0"/>
-                        <DoubleSpinBox name="saturation:" value="0"/>
-                        <CheckBox name="autogain:" value="1"/>
-                        <CheckBox name="autoexposure:" value="1"/>
-                        <CheckBox name="awb:" value="1"/>
-                        <Label name="fps"/>
-                    </GroupBox>
-                    <GridLayout name="setup"/>
-                </Tab>
-            </TabWidget>
-        </Tab>
-
-        <Tab name="Dualshock3">
-            <TabWidget name="Dualshock3">
-                <Tab name="Reglages">
-                    <GroupBox name="consignes joy">
-                        <DoubleSpinBox value="-15" name="debattement roll"/>
-                        <DoubleSpinBox value="-15" name="debattement pitch"/>
-                        <DoubleSpinBox value="90" name="debattement wz"/>
-                        <DoubleSpinBox value="-0.5" name="debattement dz"/>
-                        <DoubleSpinBox value="0.02" name="trim"/>
-                        <Label name="trim roll"/>
-                        <PushButton value="0" name="reset roll trim"/>
-                        <Label name="trim pitch"/>
-                        <PushButton value="0" name="reset pitch trim"/>
-                    </GroupBox>
-                </Tab>
-            </TabWidget>
+            <Tab name="Mesures Drone_0"><DataPlot1D name="x" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="y" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="z" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="vx" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="vy" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="vz" period="100" enabled="0" nb_buf="1"/></Tab><Tab name="Mesures (xy) Drone_0"><DataPlot2D name="xy" period="100" enabled="1" nb_buf="1"/></Tab></TabWidget>
         </Tab>
 
         <Tab name="control laws">
@@ -376,14 +373,14 @@
                 <Tab name="Setup">
                     <GroupBox name="u_roll">
                         <DoubleSpinBox value="20" name="sat ref:"/>
-                        <DoubleSpinBox value="12" name="kp:"/>
+                        <DoubleSpinBox value="20" name="kp:"/>
                         <DoubleSpinBox value="1000" name="sat dref:"/>
                         <DoubleSpinBox value="0.2" name="kd:"/>
                         <DoubleSpinBox value="0.4" name="sat u:"/>
                     </GroupBox>
                     <GroupBox name="u_pitch">
                         <DoubleSpinBox value="20" name="sat ref:"/>
-                        <DoubleSpinBox value="12" name="kp:"/>
+                        <DoubleSpinBox value="20" name="kp:"/>
                         <DoubleSpinBox value="1000" name="sat dref:"/>
                         <DoubleSpinBox value="0.2" name="kd:"/>
                         <DoubleSpinBox value="0.4" name="sat u:"/>
@@ -425,21 +422,21 @@
                 </Tab>
                 <Tab name="Graphes">
                     <DataPlot1D name="u_roll" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="u_pitch" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="u_yaw" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
+                    </DataPlot1D>
+                    <DataPlot1D name="u_z" period="100" enabled="0" nb_buf="1">
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="u_x" period="100" enabled="0">
                         <Setup period="100" enabled="0"/>
                     </DataPlot1D>
                     <DataPlot1D name="u_y" period="100" enabled="0">
-                        <Setup period="100" enabled="0"/>
-                    </DataPlot1D>
-                    <DataPlot1D name="u_z" period="100" enabled="0" nb_buf="1">
                         <Setup period="100" enabled="0"/>
                     </DataPlot1D>
                 </Tab>
@@ -448,192 +445,328 @@
 
         <Tab name="control laws custom">
             <TabWidget name="laws">
-                <Tab name="Setup Linear">
-                    <GroupBox name="u_lin">
-                        <DoubleSpinBox name="k1:" value="5"/>
-                        <DoubleSpinBox name="k2:" value="10"/>
-                        <DoubleSpinBox name="k3:" value="95"/>
-                        <DoubleSpinBox name="k4:" value="144"/>
-                        <DoubleSpinBox name="k5:" value="0"/>
-                        <DoubleSpinBox name="k6:" value="0"/>
-                        <DoubleSpinBox name="k7:" value="612"/>
-                        <DoubleSpinBox name="k8:" value="110"/>
-                        <DoubleSpinBox name="k9:" value="0"/>
-                        <DoubleSpinBox name="k10:" value="0"/>
-                        <DoubleSpinBox name="k11:" value="612"/>
-                        <DoubleSpinBox name="k12:" value="110"/>
-                        <DoubleSpinBox name="sat roll:" value="0.8"/>
-                        <DoubleSpinBox name="sat pitch:" value="0.8"/>
-                        <DoubleSpinBox name="sat yaw:" value="0.8"/>
-                        <DoubleSpinBox name="sat thrust:" value="1"/>
-                        <DoubleSpinBox name="km:" value="6.450"/>
-                        <DoubleSpinBox name="J11" value="0.002098"/>
-                        <DoubleSpinBox name="J22" value="0.002102"/>
-                        <DoubleSpinBox name="J33" value="0.004068"/>
-                        <DoubleSpinBox name="J12" value="0.000063577538"/>
-                        <DoubleSpinBox name="J13" value="2.002648e-06"/>
-                        <DoubleSpinBox name="J23" value="2.86186e-07"/>
-                        <DoubleSpinBox name="m" value="0.436"/>
-                        <DoubleSpinBox name="g" value="-9.81"/>
-                    </GroupBox>
-                </Tab>
-                <Tab name="Setup Nested">
-                    <GroupBox name="u_nes">
-                        <DoubleSpinBox name="k1:" value="5"/>
-                        <DoubleSpinBox name="k2:" value="10"/>
-                        <DoubleSpinBox name="k3:" value="95"/>
-                        <DoubleSpinBox name="k4:" value="144"/>
-                        <DoubleSpinBox name="a1:" value="43"/>
-                        <DoubleSpinBox name="b1:" value="19"/>
-                        <DoubleSpinBox name="c1:" value="7"/>
-                        <DoubleSpinBox name="d1:" value="1"/>
-                        <DoubleSpinBox name="a2:" value="43"/>
-                        <DoubleSpinBox name="b2:" value="19"/>
-                        <DoubleSpinBox name="c2:" value="7"/>
-                        <DoubleSpinBox name="d2:" value="1"/>
-                        <DoubleSpinBox name="sat roll:" value="0.8"/>
-                        <DoubleSpinBox name="sat pitch:" value="0.8"/>
-                        <DoubleSpinBox name="sat yaw:" value="0.8"/>
-                        <DoubleSpinBox name="sat thrust:" value="1"/>
-                        <DoubleSpinBox name="km:" value="6.450"/>
-                        <DoubleSpinBox name="J11" value="0.002098"/>
-                        <DoubleSpinBox name="J22" value="0.002102"/>
-                        <DoubleSpinBox name="J33" value="0.004068"/>
-                        <DoubleSpinBox name="J12" value="0.000063577538"/>
-                        <DoubleSpinBox name="J13" value="2.002648e-06"/>
-                        <DoubleSpinBox name="J23" value="2.86186e-07"/>
-                        <DoubleSpinBox name="m" value="0.436"/>
-                        <DoubleSpinBox name="g" value="-9.81"/>
-                    </GroupBox>
-                </Tab>
 
                 <Tab name="Setup Sliding">
                     <GroupBox name="u_smc">
                         <DoubleSpinBox value="0" name="period, 0 for auto"/>
                         <DoubleSpinBox name="k1:" value="5"/>
                         <DoubleSpinBox name="k2:" value="10"/>
-                        <DoubleSpinBox name="gamma:" value="0.00001"/>
+                        <DoubleSpinBox name="gamma:" value="0.001"/>
                         <DoubleSpinBox name="alpha:" value="15"/>
                         <DoubleSpinBox name="k:" value="40"/>
-                        <DoubleSpinBox name="Kd:" value="3"/>
-                        <DoubleSpinBox name="sat roll:" value="0.5"/>
-                        <DoubleSpinBox name="sat pitch:" value="0.5"/>
-                        <DoubleSpinBox name="sat yaw:" value="0.5"/>
+                        <DoubleSpinBox name="kd:" value="3"/>
+                        <DoubleSpinBox name="sat roll:" value="0.8"/>
+                        <DoubleSpinBox name="sat pitch:" value="0.8"/>
+                        <DoubleSpinBox name="sat yaw:" value="0.8"/>
                         <DoubleSpinBox name="sat thrust:" value="1"/>
                         <DoubleSpinBox name="km:" value="6.45"/>
                         <DoubleSpinBox name="m" value="0.436"/>
                         <DoubleSpinBox name="g" value="-9.81"/>
                         <DoubleSpinBox name="p:" value="3000"/>
-                    </GroupBox>
+                    <DoubleSpinBox name="Kd:" value="1"/><GroupBox name="PD Thrust"><DoubleSpinBox name="period, 0 for auto" value="0"/><DoubleSpinBox name="k1:" value="5"/><DoubleSpinBox name="k2:" value="10"/><DoubleSpinBox name="m" value="0.436"/><DoubleSpinBox name="g" value="-9.81"/></GroupBox><GroupBox name="Attitude"><DoubleSpinBox name="gamma_roll:" value="0.01"/><DoubleSpinBox name="gamma_pitch:" value="0.01"/><DoubleSpinBox name="gamma_yaw:" value="0.01"/><DoubleSpinBox name="alpha_roll:" value="30"/><DoubleSpinBox name="alpha_pitch:" value="30"/><DoubleSpinBox name="alpha_yaw:" value="30"/><DoubleSpinBox name="k:" value="40"/><DoubleSpinBox name="p:" value="3000"/><Label name="Latencia ori:"/><DoubleSpinBox name="Kd_roll:" value="1.5"/><DoubleSpinBox name="Kd_pitch:" value="1.5"/><DoubleSpinBox name="Kd_yaw:" value="1.5"/></GroupBox><GroupBox name="Motors"><DoubleSpinBox name="sat roll:" value="0.8"/><DoubleSpinBox name="sat pitch:" value="0.8"/><DoubleSpinBox name="sat yaw:" value="0.8"/><DoubleSpinBox name="sat thrust:" value="1"/><DoubleSpinBox name="km:" value="6.45"/></GroupBox></GroupBox>
                     <GroupBox name="Tracking">
                         <Label name="a*sin(b*t)"/>
                         <DoubleSpinBox name="a:" value="0.5"/>
                         <DoubleSpinBox name="b:" value="1"/>
-                    </GroupBox>
-                </Tab>
-
-                <Tab name="Graficas Linear">
-                    <DataPlot1D name="u_roll" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
-                    </DataPlot1D>
-                    <DataPlot1D name="u_pitch" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
-                    </DataPlot1D>
-                    <DataPlot1D name="u_yaw" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
-                    </DataPlot1D>
-                    <DataPlot1D name="u_z" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
-                    </DataPlot1D>
-                </Tab>
-                <Tab name="Graficas Nested">
-                    <DataPlot1D name="u_roll" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
-                    </DataPlot1D>
-                    <DataPlot1D name="u_pitch" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
-                    </DataPlot1D>
-                    <DataPlot1D name="u_yaw" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
-                    </DataPlot1D>
-                    <DataPlot1D name="u_z" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
-                    </DataPlot1D>
+                    <Label name="funcion"/></GroupBox>
                 </Tab>
 
                 <Tab name="Graficas Sliding">
                     <DataPlot1D name="u_roll" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="u_pitch" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="u_yaw" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
                     <DataPlot1D name="u_z" period="100" enabled="0" nb_buf="1">
-                        <Setup period="100" enabled="0"/>
+                        <Setup period="100" enabled="1"/>
                     </DataPlot1D>
-                </Tab>
+                <DataPlot1D name="nu_q" period="100" enabled="0" nb_buf="1"/></Tab>
 
-            <Tab name="Setup Sliding Pos"><GroupBox name="u_smc_pos"><DoubleSpinBox name="period, 0 for auto" value="0"/><DoubleSpinBox name="gamma:" value="0"/><DoubleSpinBox name="p:" value="0"/><DoubleSpinBox name="alpha:" value="0"/><DoubleSpinBox name="k:" value="0"/><DoubleSpinBox name="Kd:" value="0"/><DoubleSpinBox name="gamma_p:" value="0"/><DoubleSpinBox name="alpha_p:" value="0"/><DoubleSpinBox name="Kp:" value="0"/><DoubleSpinBox name="sat roll:" value="0"/><DoubleSpinBox name="sat pitch:" value="0"/><DoubleSpinBox name="sat yaw:" value="0"/><DoubleSpinBox name="sat thrust:" value="0"/><DoubleSpinBox name="km:" value="0"/><DoubleSpinBox name="km_z:" value="0"/><DoubleSpinBox name="m" value="0"/><DoubleSpinBox name="g" value="0"/></GroupBox></Tab><Tab name="Graficas Sliding Pos"><DataPlot1D name="u_roll" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="u_pitch" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="u_yaw" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="u_z" period="100" enabled="0" nb_buf="1"/></Tab></TabWidget>
-        </Tab>
-
-        <Tab name="predictor">
-            <DataPlot1D name="u_pitch" period="100" enabled="1"/>
-        </Tab>
-
-        <Tab name="position">
-            <TabWidget name="position">
-                <Tab name="Setup position">
-                    <GroupBox name="position">
-                        <DoubleSpinBox name="x" value="0"/>
-                        <DoubleSpinBox name="y" value="0"/>
-                        <DoubleSpinBox name="z" value="0"/>
-                        <DoubleSpinBox name="xp" value="0"/>
-                        <DoubleSpinBox name="yp" value="0"/>
-                        <DoubleSpinBox name="zp" value="0"/>
-                        <DoubleSpinBox name="xpp" value="0"/>
-                        <DoubleSpinBox name="ypp" value="0"/>
-                        <DoubleSpinBox name="zpp" value="0"/>
-                        <DoubleSpinBox name="xppp" value="0"/>
-                        <DoubleSpinBox name="yppp" value="0"/>
-                        <DoubleSpinBox name="zppp" value="0"/>
+                <Tab name="Setup Sliding Pos">
+                    <GroupBox name="u_smc_pos">
+                        <DoubleSpinBox name="period, 0 for auto" value="0"/>
+                        <DoubleSpinBox name="gamma:_0" value="0.001000000000"/>
+                        <DoubleSpinBox name="p:" value="3000"/>
+                        <DoubleSpinBox name="alpha:_0" value="20.000"/>
+                        <DoubleSpinBox name="k:" value="40"/>
+                        <DoubleSpinBox name="Kd:_0" value="1.000"/>
+                        <DoubleSpinBox name="sat roll:" value="0.8"/>
+                        <DoubleSpinBox name="sat pitch:" value="0.8"/>
+                        <DoubleSpinBox name="sat yaw:" value="0.8"/>
+                        <DoubleSpinBox name="sat thrust:" value="1"/>
+                        <DoubleSpinBox name="km:" value="6.45"/>
+                        <DoubleSpinBox name="m" value="0.436"/>
+                        <DoubleSpinBox name="g" value="9.81"/>
+                        <DoubleSpinBox name="gamma:" value="0.001"/>
+                        <DoubleSpinBox name="alpha:" value="10"/>
+                        <DoubleSpinBox name="Kd:" value="1"/>
+                        <DoubleSpinBox name="gamma_p:" value="0.00000010000"/>
+                        <DoubleSpinBox name="alpha_p:" value="5"/>
+                        <DoubleSpinBox name="Kp:" value="1"/>
+                        <DoubleSpinBox name="km_z:" value="6.45"/>
+                    <GroupBox name="Orientacion">
+                        <DoubleSpinBox name="gamma_roll:" value="0.001"/>
+                        <DoubleSpinBox name="gamma_pitch:" value="0.001"/>
+                        <DoubleSpinBox name="gamma_yaw:" value="0.001"/>
+                        <DoubleSpinBox name="alpha_roll:" value="30"/>
+                        <DoubleSpinBox name="alpha_pitch:" value="30"/>
+                        <DoubleSpinBox name="alpha_yaw:" value="30"/>
+                        <DoubleSpinBox name="k:" value="40"/>
+                        <DoubleSpinBox name="p:" value="3000"/>
+                        <DoubleSpinBox name="Kd_rol:" value="1"/>
+                        <DoubleSpinBox name="Kd_pitch:" value="1"/>
+                        <DoubleSpinBox name="Kd_yaw:" value="1"/>
+                        <Label name="Latencia ori"/>
+                    </GroupBox>
+                    <GroupBox name="Posicion">
+                        <DoubleSpinBox name="gamma_x:" value="0.001"/>
+                        <DoubleSpinBox name="gamma_y:" value="0.001"/>
+                        <DoubleSpinBox name="gamma_z:" value="0.001"/>
+                        <DoubleSpinBox name="alpha_x:" value="1.5"/>
+                        <DoubleSpinBox name="alpha_y:" value="1.5"/>
+                        <DoubleSpinBox name="alpha_z:" value="1.5"/>
+                        <DoubleSpinBox name="Kp_x:" value="1.5"/>
+                        <DoubleSpinBox name="Kp_y:" value="1.5"/>
+                        <DoubleSpinBox name="Kp_z:" value="1.5"/>
+                        <DoubleSpinBox name="m" value="0.466"/>
+                        <DoubleSpinBox name="g" value="9.81"/>
+                        <Label name="Latencia pos"/>
+                    </GroupBox>
+                    <GroupBox name="Motores">
+                        <DoubleSpinBox name="sat roll:" value="0.8"/>
+                        <DoubleSpinBox name="sat pitch:" value="0.8"/>
+                        <DoubleSpinBox name="sat yaw:" value="0.8"/>
+                        <DoubleSpinBox name="sat thrust:" value="1"/>
+                        <DoubleSpinBox name="km:" value="6.45"/>
+                        <DoubleSpinBox name="km_z:" value="6.45"/>
+                    </GroupBox>
+                    <GroupBox name="Integral y derivada">
+                        <DoubleSpinBox name="period, 0 for auto" value="0"/>
+                        <DoubleSpinBox name="alpha Levant:" value="35"/>
+                        <DoubleSpinBox name="lambda Levant:" value="30"/>
+                        <CheckBox name="Levant" value="0"/>
+                    </GroupBox>
                     </GroupBox>
                 </Tab>
-                <Tab name="Graph position">
-                    <DataPlot1D name="r" period="100" enabled="0" nb_buf="1"/>
-                    <DataPlot1D name="p" period="100" enabled="0" nb_buf="1"/>
-                    <DataPlot1D name="y" period="100" enabled="0" nb_buf="1"/>
-                </Tab>
-            </TabWidget>
+
+                <Tab name="Graficas Sliding Pos">
+                    <DataPlot1D name="u_roll" period="100" enabled="0" nb_buf="1"/>
+                    <DataPlot1D name="u_pitch" period="100" enabled="0" nb_buf="1"/>
+                    <DataPlot1D name="u_yaw" period="100" enabled="0" nb_buf="1"/>
+                    <DataPlot1D name="u_z" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="nu_rp" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="nu_r" period="100" enabled="0" nb_buf="1"/></Tab>
+            <Tab name="Reference position"><GroupBox name="Setup reference"><ComboBox name="Select behavior" value="0"/></GroupBox><GroupBox name="Setup regulation"><DoubleSpinBox name="x" value="0"/><DoubleSpinBox name="y" value="0"/><DoubleSpinBox name="z" value="-1"/></GroupBox><GroupBox name="Setup tracking"><ComboBox name="Select xd behavior" value="1"/><ComboBox name="Select yd behavior" value="2"/><ComboBox name="Select zd behavior" value="1"/><GroupBox name="xd"><Label name="funcion"/><DoubleSpinBox name="Amplitude (a)" value="0.2"/><DoubleSpinBox name="Frecuency (w)" value="1"/><DoubleSpinBox name="Offset (b)" value="0"/></GroupBox><GroupBox name="yd"><Label name="funcion"/><DoubleSpinBox name="Amplitude (a)" value="0.2"/><DoubleSpinBox name="Frecuency (w)" value="1"/><DoubleSpinBox name="Offset (b)" value="0"/></GroupBox><GroupBox name="zd"><Label name="funcion"/><DoubleSpinBox name="Amplitude (a)" value="0.2"/><DoubleSpinBox name="Frecuency (w)" value="1"/><DoubleSpinBox name="Offset (b)" value="-1"/></GroupBox></GroupBox><GroupBox name="Setup trajectory"/></Tab><Tab name="Desired orientation"><DataPlot1D name="r" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="p" period="100" enabled="0" nb_buf="1"/><DataPlot1D name="y" period="100" enabled="0" nb_buf="1"/></Tab></TabWidget>
         </Tab>
 
-        <Tab name="JR3">
-            <TabWidget name="JR3">
-                <Tab name="Reglages">
+    <Tab name="position">
+        <TabWidget name="position">
+            <Tab name="Setup position">
+                <GroupBox name="position">
+                    <DoubleSpinBox name="x" value="6.2"/>
+                    <DoubleSpinBox name="y" value="0"/>
+                    <DoubleSpinBox name="z" value="-1"/>
+                    <DoubleSpinBox name="xp" value="2"/>
+                    <DoubleSpinBox name="yp" value="0.5"/>
+                    <DoubleSpinBox name="zp" value="1"/>
+                    <DoubleSpinBox name="xpp" value="1"/>
+                    <DoubleSpinBox name="ypp" value="0"/>
+                    <DoubleSpinBox name="zpp" value="0"/>
+                    <DoubleSpinBox name="xppp" value="0"/>
+                    <DoubleSpinBox name="yppp" value="0"/>
+                    <DoubleSpinBox name="zppp" value="-2.300"/>
+                </GroupBox>
+            </Tab>
+            
+            <Tab name="Graph position">
+                <DataPlot1D name="r" period="100" enabled="1" nb_buf="1"/>
+                <DataPlot1D name="p" period="100" enabled="1" nb_buf="1"/>
+                <DataPlot1D name="y" period="100" enabled="1" nb_buf="1"/>
+            </Tab>
+        </TabWidget>
+    </Tab>
+    
+    <Tab name="JR3">
+        <TabWidget name="JR3">
+            <Tab name="Reglages">
+                <SpinBox name="Sampling time" value="0"/>
+                <PushButton name="Set Ts"/>
+                <GroupBox name="setup">
                     <SpinBox name="Sampling time" value="5000"/>
                     <PushButton name="Set Ts" value="1"/>
-                </Tab>
-                <Tab name="Measures">
-                    <DataPlot1D name="Fx [N]" period="100" enabled="0" nb_buf="1"/>
-                    <DataPlot1D name="Fy [N]" period="100" enabled="0" nb_buf="1"/>
-                    <DataPlot1D name="Fz [N]" period="100" enabled="0" nb_buf="1"/>
-                    <DataPlot1D name="Mx [N*m]" period="100" enabled="0" nb_buf="1"/>
-                    <DataPlot1D name="My [N*m]" period="100" enabled="0" nb_buf="1"/>
-                    <DataPlot1D name="Mz [N*m]" period="100" enabled="0" nb_buf="1"/>
-                </Tab>
-            </TabWidget>
-        </Tab>
-
-    </TabWidget>
+                    <Label name="Latencia"/>
+                </GroupBox>
+            </Tab>
+            
+            <Tab name="Measures">
+                <DataPlot1D name="Fx [N]" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="Fy [N]" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="Fz [N]" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="Mx [N*m]" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="My [N*m]" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="Mz [N*m]" period="100" enabled="0" nb_buf="1"/>
+            </Tab>
+        </TabWidget>
+    </Tab>
+    
+    <Tab name="Force">
+        <TabWidget name="laws">
+            <Tab name="Setup">
+                <GroupBox name="u_smc_force">
+                    <GroupBox name="Integral y derivada">
+                        <DoubleSpinBox name="period, 0 for auto" value="0"/>
+                        <DoubleSpinBox name="alpha Levant:" value="40"/>
+                        <DoubleSpinBox name="lambda Levant:" value="38"/>
+                        <CheckBox name="Levant" value="0"/>
+                        <DoubleSpinBox name="alpha 1 Levant:" value="0"/>
+                        <DoubleSpinBox name="alpha 2 Levant:" value="0"/>
+                        <DoubleSpinBox name="alpha 3 Levant:" value="0"/>
+                        <DoubleSpinBox name="lambda 1 Levant:" value="0"/>
+                        <DoubleSpinBox name="lambda 2 Levant:" value="0"/>
+                        <DoubleSpinBox name="lambda 3 Levant:" value="0"/>
+                    </GroupBox>
+                    <GroupBox name="Orientacion">
+                        <DoubleSpinBox name="gamma_roll:" value="0.001"/>
+                        <DoubleSpinBox name="gamma_pitch:" value="0.001"/>
+                        <DoubleSpinBox name="gamma_yaw:" value="0.001"/>
+                        <DoubleSpinBox name="alpha_roll:" value="15"/>
+                        <DoubleSpinBox name="alpha_pitch:" value="15"/>
+                        <DoubleSpinBox name="alpha_yaw:" value="15"/>
+                        <DoubleSpinBox name="k:" value="40"/>
+                        <DoubleSpinBox name="p:" value="3000"/>
+                        <Label name="Latencia ori"/>
+                        <DoubleSpinBox name="Kd_rol:" value="1"/>
+                        <DoubleSpinBox name="Kd_pitch:" value="1"/>
+                        <DoubleSpinBox name="Kd_yaw:" value="1"/>
+                    </GroupBox>
+                    <GroupBox name="Posicion">
+                        <DoubleSpinBox name="gamma_x:" value="0.001"/>
+                        <DoubleSpinBox name="gamma_y:" value="0.001"/>
+                        <DoubleSpinBox name="gamma_z:" value="0.001"/>
+                        <DoubleSpinBox name="alpha_x:" value="1.500"/>
+                        <DoubleSpinBox name="alpha_y:" value="1.500"/>
+                        <DoubleSpinBox name="alpha_z:" value="1.500"/>
+                        <DoubleSpinBox name="Kp_x:" value="1.0"/>
+                        <DoubleSpinBox name="Kp_y:" value="1.0"/>
+                        <DoubleSpinBox name="Kp_z:" value="2.0"/>
+                        <DoubleSpinBox name="m" value="0.466"/>
+                        <DoubleSpinBox name="g" value="9.81"/>
+                        <Label name="Latencia pos"/>
+                        <DoubleSpinBox name="mup:" value="30"/>
+                    </GroupBox>
+                    <GroupBox name="Fuerza">
+                        <DoubleSpinBox name="gamma_fx:" value="0.5"/>
+                        <DoubleSpinBox name="gamma_fy:" value="0.001"/>
+                        <DoubleSpinBox name="gamma_fz:" value="0.001"/>
+                        <DoubleSpinBox name="eta:" value="1"/>
+                        <DoubleSpinBox name="beta_1:" value="0.1"/>
+                        <DoubleSpinBox name="beta_2:" value="0.1"/>
+                        <DoubleSpinBox name="mu:" value="3000"/>
+                        <DoubleSpinBox name="kf:" value="0.000"/>
+                        <DoubleSpinBox name="kf_x:" value="5"/>
+                        <DoubleSpinBox name="alpha_fx:" value="15"/>
+                        <DoubleSpinBox name="alpha_pf:" value="0.002"/>
+                        <DoubleSpinBox name="eta_1:" value="0.1"/>
+                        <DoubleSpinBox name="eta_2:" value="0.1"/>
+                        <DoubleSpinBox name="muf:" value="30"/>
+                        <DoubleSpinBox name="mu_f:" value="1.000"/>
+                        <DoubleSpinBox name="mu_t:" value="1.000"/>
+                    </GroupBox>
+                    <GroupBox name="Motores">
+                        <DoubleSpinBox name="sat roll:" value="0.8"/>
+                        <DoubleSpinBox name="sat pitch:" value="0.8"/>
+                        <DoubleSpinBox name="sat yaw:" value="0.8"/>
+                        <DoubleSpinBox name="sat thrust:" value="1"/>
+                        <DoubleSpinBox name="km:" value="6.45"/>
+                        <DoubleSpinBox name="km_z:" value="6.45"/>
+                    </GroupBox>
+                </GroupBox>
+            </Tab>
+            
+            <Tab name="Sliding">
+                <DataPlot1D name="nu_rp" period="100" enabled="1" nb_buf="1"/>
+                <DataPlot1D name="nu_r" period="100" enabled="1" nb_buf="1"/>
+                <DataPlot1D name="Sf" period="100" enabled="1" nb_buf="1"/>
+                <DataPlot1D name="Sr" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="S_p" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="S_a" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="Svf" period="100" enabled="0" nb_buf="1"/>
+            </Tab>
+            
+            <Tab name="Graphs">
+                <DataPlot1D name="r" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="p" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="y" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="Fx" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="Fy" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="Fz" period="100" enabled="0" nb_buf="1"/>
+            </Tab>
+            
+            <Tab name="Outputs">
+                <DataPlot1D name="u_roll" period="100" enabled="1" nb_buf="1"/>
+                <DataPlot1D name="u_pitch" period="100" enabled="1" nb_buf="1"/>
+                <DataPlot1D name="u_yaw" period="100" enabled="1" nb_buf="1"/>
+                <DataPlot1D name="u_z" period="100" enabled="1" nb_buf="1"/>
+            </Tab>
+            
+            <Tab name="Reference force">
+                <GroupBox name="Setup reference">
+                    <ComboBox name="Select behavior" value="0"/>
+                </GroupBox>
+                <GroupBox name="Setup regulation">
+                    <DoubleSpinBox name="fx" value="-0.5"/>
+                    <DoubleSpinBox name="fy" value="0.2"/>
+                    <DoubleSpinBox name="fz" value="0.2"/>
+                </GroupBox>
+                <GroupBox name="Setup tracking">
+                    <ComboBox name="Select fxd behavior" value="0"/>
+                    <ComboBox name="Select fyd behavior" value="0"/>
+                    <ComboBox name="Select fzd behavior" value="0"/>
+                    <GroupBox name="fxd">
+                        <Label name="funcion"/>
+                        <DoubleSpinBox name="Amplitude (a)" value="0"/>
+                        <DoubleSpinBox name="Frecuency (w)" value="0"/>
+                        <DoubleSpinBox name="Offset (b)" value="0"/>
+                    </GroupBox>
+                    <GroupBox name="fyd">
+                        <Label name="funcion"/>
+                        <DoubleSpinBox name="Amplitude (a)" value="0"/>
+                        <DoubleSpinBox name="Frecuency (w)" value="0"/>
+                        <DoubleSpinBox name="Offset (b)" value="0"/>
+                    </GroupBox>
+                    <GroupBox name="fzd">
+                        <Label name="funcion"/>
+                        <DoubleSpinBox name="Amplitude (a)" value="0"/>
+                        <DoubleSpinBox name="Frecuency (w)" value="0"/>
+                        <DoubleSpinBox name="Offset (b)" value="0"/>
+                    </GroupBox>
+                </GroupBox>
+                <GroupBox name="Setup trajectory"/>
+            </Tab>
+            
+            <Tab name="Control">
+                <DataPlot1D name="tau_roll" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="tau_pitch" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="tau_yaw" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="u_x" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="u_y" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="u_z" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="Levant_err" period="100" enabled="0" nb_buf="1"/>
+                <DataPlot1D name="T" period="100" enabled="0" nb_buf="1"/>
+            </Tab>
+        </TabWidget>
+    </Tab>
+    <Tab name="camv"><TabWidget name="camv"><Tab name="Setup"><GroupBox name="camv"><DoubleSpinBox name="gain:" value="0"/><DoubleSpinBox name="exposure:" value="0"/><DoubleSpinBox name="bright:" value="0"/><DoubleSpinBox name="contrast:" value="0"/><DoubleSpinBox name="hue:" value="0"/><DoubleSpinBox name="sharpness:" value="0"/><DoubleSpinBox name="saturation:" value="0"/><CheckBox name="autogain:" value="1"/><CheckBox name="autoexposure:" value="1"/><CheckBox name="awb:" value="1"/><Label name="fps"/></GroupBox><GridLayout name="setup"/></Tab></TabWidget></Tab><Tab name="camh"><TabWidget name="camh"><Tab name="Setup"><GroupBox name="camh"><DoubleSpinBox name="gain:" value="0"/><DoubleSpinBox name="exposure:" value="0"/><DoubleSpinBox name="bright:" value="0"/><DoubleSpinBox name="contrast:" value="0"/><DoubleSpinBox name="hue:" value="0"/><DoubleSpinBox name="sharpness:" value="0"/><DoubleSpinBox name="saturation:" value="0"/><CheckBox name="autogain:" value="1"/><CheckBox name="autoexposure:" value="1"/><CheckBox name="awb:" value="1"/><Label name="fps"/></GroupBox><GridLayout name="setup"/></Tab></TabWidget></Tab></TabWidget>
 
     <TabWidget name="App_TabWidget">
-        <Tab name="Drone_0">
+        <Tab name="x4_0">
             <PushButton name="save config on target" value="1"/>
         </Tab>
     </TabWidget>
 
-    <PushButton name="save config on target (Drone_0)" value="1"/>
+    <PushButton name="save config on target (x4_0)" value="1"/>
 
-</root>
+<PushButton name="save config on target (Drone_0)" value="1"/></root>

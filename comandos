@@ -9,6 +9,9 @@ $FLAIR_ROOT/flair-install/bin/tools/core2-64/dualshock3_local_usb.sh
 sudo -E ${FLAIR_ROOT}/flair-install/bin/tools/core2-64/dualshock3_bt.sh <ip_dron>
 sudo -E $FLAIR_ROOT/flair-install/bin/tools/core2-64/dualshock3_local_bt.sh
 
+- JR3
+$FLAIR_ROOT/flair-install/bin/tools/core2-64/JR3Sensor.sh <ip_dron>
+
 
 - Simulador
 cd $FLAIR_ROOT/flair-install/bin/demos/core2-64/<proyecto>

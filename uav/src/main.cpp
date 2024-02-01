@@ -41,7 +41,7 @@ int main(int argc, char *argv[]){
 
 	FrameworkManager *manager;
 	manager = new FrameworkManager(name);
-	manager->SetupConnection(address, port);
+	manager->SetupConnection(address, port, (Time)30000000000); // 15s timeout 
 	manager->SetupUserInterface(xml_file);
 	manager->SetupLogger(log_path);
 
