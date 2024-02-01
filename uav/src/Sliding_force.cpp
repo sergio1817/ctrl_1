@@ -203,7 +203,7 @@ void Sliding_force::Reset(void) {
     sgnfx = 0;
     sgnfxp = 0;
 
-    Printf("Reset\n");
+    //Printf("Reset\n");
 }
 
 void Sliding_force::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector3Df xidpp, Vector3Df xidppp, Vector3Df w, Quaternion q, Vector3Df F, Vector3Df Fd){
@@ -441,15 +441,17 @@ void Sliding_force::UpdateFrom(const io_data *data) {
     // std::cout << "Fd: " << Fd << std::endl;
 
     Position(u_p,xie,xiep,xid,xidpp,xidppp,q);
-    Printf("Pos\n");
+    //Printf("Pos\n");
     ForcePosition(u_f,xie,xiep,xid,xidpp,xidppp,q,F,Fd);
-    Printf("Force-Pos\n");
+    //Printf("Force-Pos\n");
 
     float psi = tanhf(mu_t->Value()*F.norm());
 
+    std::cout << "Psi: " << psi << std::endl;
+
     u = 0.5*psi*u_f + (1-0.5*psi)*u_p;
 
-    Printf("U\n");
+    //Printf("U\n");
 
     Trs = u.norm();
 
@@ -468,7 +470,7 @@ void Sliding_force::UpdateFrom(const io_data *data) {
     Eigen::Vector3f uh = u.normalized();
     Eigen::Vector3f uph = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
 
-    Printf("Norm\n");
+    //Printf("Norm\n");
     qd = Eigen::Quaternionf( (0.5)*sqrtf(-2*uh(2)+2) , uh(1)/sqrtf(-2*uh(2)+2), -uh(0)/sqrtf(-2*uh(2)+2), 0);
 
     Eigen::Quaternionf qdp(-(0.5)*(uph(2)/sqrtf(-2*uh(2)+2)),
@@ -479,7 +481,7 @@ void Sliding_force::UpdateFrom(const io_data *data) {
     Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
 
     //wd << (uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ),  -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
-    Printf("Diff\n");
+    //Printf("Diff\n");
 
 
     
@@ -494,7 +496,7 @@ void Sliding_force::UpdateFrom(const io_data *data) {
     Eigen::Vector3f tau;
 
     Orientation(tau,qd,wd,q,w);
-    Printf("Tau\n");
+    //Printf("Tau\n");
 
     // Eigen::Matrix3f Wi;
 

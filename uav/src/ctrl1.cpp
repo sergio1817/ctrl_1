@@ -766,8 +766,10 @@ void ctrl1::sliding_ctrl_force(Euler &torques){
     Vector3Df Fd;
 
     force_reference(Fd, tactual);
+
+    pos_reference(xid, xidp, xidpp, xidppp, tactual);
     
-    u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion,F,Fd);
+    u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularSpeed,currentQuaternion,F,Fd);
     
     u_sliding_force->Update(GetTime());
     
