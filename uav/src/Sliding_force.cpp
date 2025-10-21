@@ -289,7 +289,7 @@ void Sliding_force::UseDefaultPlot6(const LayoutPosition *position) {
 void Sliding_force::UseDefaultPlot7(const LayoutPosition *position) {    
     DataPlot1D *y = new DataPlot1D(position, "y", -3.14, 3.14);
     y->AddCurve(state->Element(28));
-    y->AddCurve(state->Element(6)),DataPlot::Blue;
+    y->AddCurve(state->Element(6),DataPlot::Blue);
     
 }
 

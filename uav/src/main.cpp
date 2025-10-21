@@ -48,7 +48,7 @@ int main(int argc, char *argv[]){
 	Uav *drone = CreateUav(name, uav_type);
 	TargetEthController *controller = new TargetEthController("Dualshock3", ds3port);
 	TargetEthJR3 *sensor = new TargetEthJR3("JR3", jr3port, 80);
-	ctrl1 *demo = new ctrl1(controller, sensor);
+	ctrl1 *demo = new ctrl1(controller);
 
 	demo->Start();
 	demo->Join();

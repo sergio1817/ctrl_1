@@ -1,12 +1,25 @@
 PROJECT(ctrl1)
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.5)
 
-# Eigen
-list(APPEND CMAKE_MODULE_PATH "~/src/eigen-3.4.0/cmake")
-SET( EIGEN3_INCLUDE_DIR "$ENV{EIGEN3_INCLUDE_DIR}" )
+### Eigen
+# Module only if FindEigen3 exits
+#list(APPEND CMAKE_MODULE_PATH "$ENV{Eigen3_MODULE}")
+#SET( EIGEN3_INCLUDE_DIR "$ENV{EIGEN3_INCLUDE_DIR}" )
+#INCLUDE_DIRECTORIES ( "${EIGEN3_INCLUDE_DIR}" )
+#find_package (Eigen3 REQUIRED)
+#link_directories(${Eigen_INCLUDE_DIRS})
+
+# No module
+set(Eigen3_DIR "$ENV{Eigen3_DIR_ARM7a}")
+SET( EIGEN3_INCLUDE_DIR "$ENV{EIGEN3_INCLUDE_DIR_ARM7a}" )
 INCLUDE_DIRECTORIES ( "${EIGEN3_INCLUDE_DIR}" )
-find_package(Eigen3 REQUIRED)
+find_package (Eigen3 REQUIRED NO_MODULE)
 link_directories(${Eigen_INCLUDE_DIRS})
+
+message(Eigen3_DIR="${Eigen3_DIR}")
+message(EIGEN3_INCLUDE_DIR="${EIGEN3_INCLUDE_DIR}")
+
+
 
 SET(FLAIR_USE_FILTER TRUE)
 SET(FLAIR_USE_SENSOR_ACTUATOR TRUE)
@@ -18,7 +31,7 @@ SET(FLAIR_USE_VRPN TRUE)
 #SET(USE_SOURCE_PERMISSIONS TRUE)
 
 include($ENV{FLAIR_ROOT}/flair-src/cmake-modules/GlobalCmakeFlair.cmake)
-include($ENV{FLAIR_ROOT}/flair-dev/cmake-modules/GlobalCmakeFlair.cmake)
+#include($ENV{FLAIR_ROOT}/flair-dev/cmake-modules/GlobalCmakeFlair.cmake)
 
 
 SET(SRC_FILES
@@ -37,4 +50,3 @@ FLAIR_DEMO(${PROJECT_NAME} "${SRC_FILES}"
            DEST_DIR ctrl1
            COPY_RESOURCES
 )
-

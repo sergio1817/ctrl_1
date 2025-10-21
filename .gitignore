@@ -1,0 +1,6 @@
+.vscode/
+gen_flair_env.sh
+gen_flair_enva.sh
+.clangd
+CMakePresets.json
+build/

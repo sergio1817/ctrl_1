@@ -37,7 +37,6 @@
 #include <ComboBox.h>
 #include <GroupBox.h>
 #include <TabWidget.h>
-#include <Tab.h>
 
 using namespace std;
 using namespace flair::core;
@@ -47,7 +46,7 @@ using namespace flair::filter;
 using namespace flair::meta;
 
 
-ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(controller), behaviourMode(BehaviourMode_t::Default), vrpnLost(false), jr3(jr3) {
+ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behaviourMode(BehaviourMode_t::Default), vrpnLost(false) {
     Uav* uav=GetUav();
 
     std::string ip_dir;
@@ -71,8 +70,8 @@ ctrl1::ctrl1(TargetController *controller, TargetJR3 *jr3): UavStateMachine(cont
         //targetVrpn=new MetaVrpnObject("target");
     }
     
-    getFrameworkManager()->AddDeviceToLog(jr3);
-    jr3->Start();
+    //getFrameworkManager()->AddDeviceToLog(jr3);
+    //jr3->Start();
 
     //set vrpn as failsafe altitude sensor for mamboedu as us in not working well for the moment
     if(uav->GetType()=="mamboedu") {
@@ -312,13 +311,13 @@ void ctrl1::ComputeCustomTorques(Euler &torques) {
             }
             break;
         
-        case 2:
-            if(vrpnLost==true){
-                Thread::Err("Force-position control can't start: VRPN lost or JR3 disconnected\n");
-            } else {
-                sliding_ctrl_force(torques);
-            }
-            break;
+        // case 2:
+        //     if(vrpnLost==true){
+        //         Thread::Err("Force-position control can't start: VRPN lost or JR3 disconnected\n");
+        //     } else {
+        //         sliding_ctrl_force(torques);
+        //     }
+        //     break;
     }
     
 }
@@ -329,18 +328,18 @@ float ctrl1::ComputeCustomThrust(void) {
 
 void ctrl1::ExtraSecurityCheck(void) {
     if ((!vrpnLost) && ((behaviourMode==BehaviourMode_t::control))) {
-        // if (!targetVrpn->IsTracked(500)) {
-        //     Thread::Err("VRPN, target lost\n");
-        //     vrpnLost=true;
-        //     EnterFailSafeMode();
-        //     Land();
-        // }
-        // if (!uavVrpn->IsTracked(500)) {
-        //     Thread::Err("VRPN, uav lost\n");
-        //     vrpnLost=true;
-        //     EnterFailSafeMode();
-        //     Land();
-        // }
+        if (!targetVrpn->IsTracked(500)) {
+            Thread::Err("VRPN, target lost\n");
+            vrpnLost=true;
+            EnterFailSafeMode();
+            Land();
+        }
+        if (!uavVrpn->IsTracked(500)) {
+            Thread::Err("VRPN, uav lost\n");
+            vrpnLost=true;
+            EnterFailSafeMode();
+            Land();
+        }
     }
 }
 
@@ -421,7 +420,7 @@ void ctrl1::Startctrl1(void) {
         Thread::Info("ctrl1: start\n");
         u_sliding->Reset();
         u_sliding_pos->Reset();
-        u_sliding_force->Reset();
+        //u_sliding_force->Reset();
     } else {
         Thread::Warn("ctrl1: could not start\n");
         l2->SetText("Control: err");
@@ -439,10 +438,10 @@ void ctrl1::Startctrl1(void) {
             Thread::Info("Sliding pos\n");
             break;
         
-        case 2:
-            l2->SetText("Control: Sliding force-position");
-            Thread::Info("Sliding force-position\n");
-            break;
+        // case 2:
+        //     l2->SetText("Control: Sliding force-position");
+        //     Thread::Info("Sliding force-position\n");
+        //     break;
     }
 
     behaviourMode=BehaviourMode_t::control;
@@ -726,59 +725,59 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
 
 }
 
-void ctrl1::sliding_ctrl_force(Euler &torques){
-    float tactual=double(GetTime())/1000000000-u_sliding_force->t0;
-    //printf("t: %f\n",tactual);
-    Vector3Df xid(0,0,-1), xidp, xidpp, xidppp;
+// void ctrl1::sliding_ctrl_force(Euler &torques){
+//     float tactual=double(GetTime())/1000000000-u_sliding_force->t0;
+//     //printf("t: %f\n",tactual);
+//     Vector3Df xid(0,0,-1), xidp, xidpp, xidppp;
 
-    Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
-    Quaternion uav_quat;
+//     Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
+//     Quaternion uav_quat;
 
-    flair::core::Time ti = GetTime();
-    uavVrpn->GetPosition(uav_pos);
-    uavVrpn->GetSpeed(uav_vel);
-    uavVrpn->GetQuaternion(uav_quat);
-    flair::core::Time  tf = GetTime()-ti;
+//     flair::core::Time ti = GetTime();
+//     uavVrpn->GetPosition(uav_pos);
+//     uavVrpn->GetSpeed(uav_vel);
+//     uavVrpn->GetQuaternion(uav_quat);
+//     flair::core::Time  tf = GetTime()-ti;
 
-    //Printf("pos: %f ms\n",  (float)tf/1000000);
+//     //Printf("pos: %f ms\n",  (float)tf/1000000);
 
-    //Thread::Info("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
-    //Printf("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
-    //Printf("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
-    //Thread::Info("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
+//     //Thread::Info("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
+//     //Printf("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
+//     //Printf("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
+//     //Thread::Info("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
 
-    ti = GetTime();
-    const AhrsData *currentOrientation = GetDefaultOrientation();
-    Quaternion currentQuaternion;
-    Vector3Df currentAngularRates;
-    currentOrientation->GetQuaternionAndAngularRates(currentQuaternion, currentAngularRates);
-    tf = GetTime()-ti;
+//     ti = GetTime();
+//     const AhrsData *currentOrientation = GetDefaultOrientation();
+//     Quaternion currentQuaternion;
+//     Vector3Df currentAngularRates;
+//     currentOrientation->GetQuaternionAndAngularRates(currentQuaternion, currentAngularRates);
+//     tf = GetTime()-ti;
 
-    //Printf("ori: %f ms\n",  (float)tf/1000000);
+//     //Printf("ori: %f ms\n",  (float)tf/1000000);
     
-    Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
+//     Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
 
-    //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
+//     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
 
-    Vector3Df F = jr3->GetForce();
+//     //Vector3Df F = jr3->GetForce();
 
-    Vector3Df Fd;
+//     Vector3Df Fd;
 
-    force_reference(Fd, tactual);
+//     force_reference(Fd, tactual);
 
-    pos_reference(xid, xidp, xidpp, xidppp, tactual);
+//     pos_reference(xid, xidp, xidpp, xidppp, tactual);
     
-    u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularSpeed,currentQuaternion,F,Fd);
+//     u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularSpeed,currentQuaternion,F,Fd);
     
-    u_sliding_force->Update(GetTime());
+//     u_sliding_force->Update(GetTime());
     
-    //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
+//     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
-    torques.roll = u_sliding_force->Output(0);
-    torques.pitch = u_sliding_force->Output(1);
-    torques.yaw = u_sliding_force->Output(2);
-    thrust = u_sliding_force->Output(3);
+//     torques.roll = u_sliding_force->Output(0);
+//     torques.pitch = u_sliding_force->Output(1);
+//     torques.yaw = u_sliding_force->Output(2);
+//     thrust = u_sliding_force->Output(3);
     
-    //thrust = ComputeDefaultThrust();
-}
+//     //thrust = ComputeDefaultThrust();
+// }

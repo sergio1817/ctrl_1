@@ -46,7 +46,7 @@ namespace flair {
 
 class ctrl1 : public flair::meta::UavStateMachine {
     public:
-        ctrl1(flair::sensor::TargetController *controller, flair::sensor::TargetJR3 *sensor);
+        ctrl1(flair::sensor::TargetController *controller);
         ~ctrl1();
 
     private:
