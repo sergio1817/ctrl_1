@@ -13,6 +13,7 @@ jobs:
       run: |
         mkdir $HOME/flair
         # variable for Flair
+        export FLAIR_ROOT=$HOME/flair
         echo "FLAIR_ROOT=$HOME/flair" >> "$GITHUB_ENV"
 
         source ~/.bashrc
@@ -24,6 +25,7 @@ jobs:
         git clone https://gitlab.utc.fr/uav-hds/flair/flair-src.git
 
         # flair binaries
+        export PATH="$PATH":"$FLAIR_ROOT"/flair-src/bin
         echo "$FLAIR_ROOT/flair-src/bin" >> "$GITHUB_PATH"
         # flair completion script
         source "$FLAIR_ROOT"/flair-src/scripts/flair_completion.sh 
