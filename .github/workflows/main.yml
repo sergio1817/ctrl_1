@@ -14,16 +14,17 @@ jobs:
         mkdir $HOME/flair
         # variable for Flair
         export FLAIR_ROOT=$HOME/flair
-        # flair binaries
-        export PATH="$PATH":"$FLAIR_ROOT"/flair-src/bin
-        # flair completion script
-        source "$FLAIR_ROOT"/flair-src/scripts/flair_completion.sh 
 
         sudo apt install python-is-python3 git mesa-utils libgl1-mesa-dev build-essential cmake file
         
         # clone flair
         cd $FLAIR_ROOT
         git clone https://gitlab.utc.fr/uav-hds/flair/flair-src.git
+
+        # flair binaries
+        export PATH="$PATH":"$FLAIR_ROOT"/flair-src/bin
+        # flair completion script
+        source "$FLAIR_ROOT"/flair-src/scripts/flair_completion.sh 
 
         $FLAIR_ROOT/flair-src/scripts/install_toolchains.sh
 
