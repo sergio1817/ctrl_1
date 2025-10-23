@@ -30,6 +30,8 @@ jobs:
 
         source ~/.bashrc
 
+    - name: Install flair
+      run: |
         $FLAIR_ROOT/flair-src/scripts/flair_compile_all.sh
 
     - name: Build project
