@@ -28,6 +28,8 @@ jobs:
 
         $FLAIR_ROOT/flair-src/scripts/install_toolchains.sh
 
+        source ~/.bashrc
+
         $FLAIR_ROOT/flair-src/scripts/flair_compile_all.sh
 
     - name: Build project
