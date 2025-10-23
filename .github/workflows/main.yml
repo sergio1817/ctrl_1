@@ -32,7 +32,9 @@ jobs:
 
         $FLAIR_ROOT/flair-src/scripts/install_toolchains.sh
 
-        source ~/.bashrc
+        echo "OECORE_CMAKE_TOOLCHAINS= \"core2_64\" " >> "$GITHUB_ENV"
+        echo "OECORE_CMAKE_CORE2_64_TOOLCHAIN= \"/opt/robomap3/2.1.3/core2-64/toolchain.cmake\" >> "$GITHUB_ENV"
+        echo "OECORE_CORE2_64_NATIVE_SYSROOT= \"/opt/robomap3/2.1.3/core2-64/sysroots/x86_64-pokysdk-linux\" >> "$GITHUB_ENV"
 
         $FLAIR_ROOT/flair-src/scripts/flair_compile_all.sh
 
