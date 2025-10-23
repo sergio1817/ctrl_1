@@ -163,10 +163,10 @@ void Sliding::UseDefaultPlot5(const LayoutPosition *position) {
 
 
 void Sliding::UpdateFrom(const io_data *data) {
-    float tactual=double(GetTime())/1000000000-t0;
+    float tactual=(double(GetTime())/1000000000)-t0;
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
 
-    //printf("tactual: %f\n",tactual);
+    //printf("control\n");
     
     if (T->Value() == 0) {
         delta_t = (float)(data->DataDeltaTime()) / 1000000000.;
@@ -174,9 +174,9 @@ void Sliding::UpdateFrom(const io_data *data) {
         delta_t = T->Value();
     }
     
-    if (first_update == true) {
+    if (first_update) {
         delta_t = 0;
-        first_update = false;
+        //first_update = false;
     }
     
     const Matrix* input = dynamic_cast<const Matrix*>(data);
@@ -202,6 +202,8 @@ void Sliding::UpdateFrom(const io_data *data) {
     Quaternion q2 = Quaternion(input->ValueNoMutex(0, 1),input->ValueNoMutex(1, 1),input->ValueNoMutex(2, 1),input->ValueNoMutex(3, 1));
 
     input->ReleaseMutex();
+
+    printf("in\n");
     
     Euler currentAngles = q2.ToEuler();
 
@@ -225,7 +227,12 @@ void Sliding::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f nu = we + alphao*QdTqe3;
     
-    Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
+    //Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
+
+    if (first_update) {
+        nu_t0 = nu;
+        first_update = false;
+    }
     
     Eigen::Vector3f nud = nu_t0*exp(-k->Value()*(tactual));
     
@@ -251,6 +258,8 @@ void Sliding::UpdateFrom(const io_data *data) {
     tau_yaw = (float)tau(2)/km->Value();
     
     Tr = (float)Trs/km->Value();
+    
+    printf("torques\n");
     
     tau_roll = -Sat(tau_roll,sat_r->Value());
     tau_pitch = -Sat(tau_pitch,sat_p->Value());

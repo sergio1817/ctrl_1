@@ -19,6 +19,7 @@
 #include "Sliding_pos.h"
 #include "Sliding_force.h"
 
+
 namespace flair {
     namespace gui {
         class PushButton;
@@ -40,7 +41,7 @@ namespace flair {
     }
     namespace sensor {
         class TargetController;
-        class TargetJR3;
+        //class TargetJR3;
     }
 }
 
@@ -51,23 +52,24 @@ class ctrl1 : public flair::meta::UavStateMachine {
 
     private:
 
-	enum class BehaviourMode_t {
+	enum class BehaviourMode_t : uint8_t {
             Default,
-            control
-        }clTabCtrl;
+            Custom,
+            Control
+        };
 
         BehaviourMode_t behaviourMode;
         bool vrpnLost;
-        flair::sensor::TargetJR3 *jr3;
+        //flair::sensor::TargetJR3 *jr3;
 
-        void ExtraCheckPushButton(void);
-        void ExtraCheckJoystick(void);
-        void SignalEvent(Event_t event);
-        void Startctrl1(void);
-        void Stopctrl1(void);
-        void ExtraSecurityCheck(void);
-        void ComputeCustomTorques(flair::core::Euler &torques);
-        float ComputeCustomThrust(void);
+        void ExtraCheckPushButton() override;
+        void ExtraCheckJoystick() override;
+        void SignalEvent(Event_t event) override;
+        void Startctrl1();
+        void Stopctrl1();
+        void ExtraSecurityCheck() override;
+        void ComputeCustomTorques(flair::core::Euler &torques) override;
+        float ComputeCustomThrust() override;
         void sliding_ctrl(flair::core::Euler &torques);
         void sliding_ctrl_pos(flair::core::Euler &torques);
         void sliding_ctrl_force(flair::core::Euler &torques);
@@ -79,7 +81,7 @@ class ctrl1 : public flair::meta::UavStateMachine {
         flair::filter::Sliding_pos *u_sliding_pos;
         flair::filter::Sliding_force *u_sliding_force;
 
-        flair::meta::MetaVrpnObject *targetVrpn,*uavVrpn;
+        flair::meta::MetaVrpnObject *uavVrpn;
         
         //bool first_update;
 

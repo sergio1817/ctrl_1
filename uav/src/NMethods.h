@@ -24,7 +24,7 @@
   * 
   * \return Integral of the function
   */
-float rk4(float(*fPtr)(float), const float iC, const float iCdt, const float dt);
+float rk4(float(*fPtr)(float),  float iC, const float iCdt, const float dt);
 
 /*!
   * \brief 4 order Runge-Kutta integration method.

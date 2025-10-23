@@ -319,9 +319,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         delta_t = T->Value();
     }
     
-    if (first_update == true) {
+    if (first_update) {
         delta_t = 0;
-        first_update = false;
+        //first_update = false;
     }
 
     const Matrix* input = dynamic_cast<const Matrix*>(data);
@@ -441,7 +441,12 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     //std::cout<<"nu: " << nu << std::endl;
     
-    Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
+    //Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
+
+    if (first_update) {
+        nu_t0 = nu;
+        first_update = false;
+    }
     
     Eigen::Vector3f nud = nu_t0*exp(-k->Value()*(tactual));
     

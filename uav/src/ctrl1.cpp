@@ -14,7 +14,7 @@
 #include "ctrl1.h"
 #include "Sliding.h"
 #include "Sliding_pos.h"
-#include "TargetJR3.h"
+//#include "TargetJR3.h"
 #include "Sliding_force.h"
 //#include "MetaJR3.h"
 #include <TargetController.h>
@@ -37,6 +37,7 @@
 #include <ComboBox.h>
 #include <GroupBox.h>
 #include <TabWidget.h>
+#include <math.h>
 
 using namespace std;
 using namespace flair::core;
@@ -156,7 +157,7 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     control_select=new ComboBox(groupbox->NewRow(),"select control");
     control_select->AddItem("Sliding");
     control_select->AddItem("Sliding Pos");
-    control_select->AddItem("Sliding Force-Position");
+    //control_select->AddItem("Sliding Force-Position");
     
     l2 = new Label(groupbox->LastRowLastCol(), "Control selec");
     l2->SetText("Control: off");
@@ -291,6 +292,20 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
 }
 
 ctrl1::~ctrl1() {
+    // delete control laws created in constructor
+    if (u_sliding != nullptr) { 
+        delete u_sliding; 
+        u_sliding = nullptr; 
+    }
+    if (u_sliding_pos != nullptr) { delete u_sliding_pos; u_sliding_pos = nullptr; }
+    if (u_sliding_force != nullptr) { delete u_sliding_force; u_sliding_force = nullptr; }
+
+    // delete VRPN objects if they were created
+    if (uavVrpn != nullptr) {
+        delete uavVrpn; 
+        uavVrpn = nullptr; }
+
+    if (customOrientation != nullptr) { delete customOrientation; customOrientation = nullptr; }
 }
 
 //this method is called by UavStateMachine::Run (main loop) when TorqueMode is Custom
@@ -304,11 +319,13 @@ void ctrl1::ComputeCustomTorques(Euler &torques) {
             break;
         
         case 1:
-            if(vrpnLost==true){
+            if(vrpnLost){
                 Thread::Err("Posrition control can't start: VRPN lost\n");
             } else {
                 sliding_ctrl_pos(torques);
             }
+            break;
+        default:
             break;
         
         // case 2:
@@ -327,13 +344,13 @@ float ctrl1::ComputeCustomThrust(void) {
 }
 
 void ctrl1::ExtraSecurityCheck(void) {
-    if ((!vrpnLost) && ((behaviourMode==BehaviourMode_t::control))) {
-        if (!targetVrpn->IsTracked(500)) {
-            Thread::Err("VRPN, target lost\n");
-            vrpnLost=true;
-            EnterFailSafeMode();
-            Land();
-        }
+    if ((!vrpnLost) && ((behaviourMode==BehaviourMode_t::Custom))) {
+        // if (!targetVrpn->IsTracked(500)) {
+        //     Thread::Err("VRPN, target lost\n");
+        //     vrpnLost=true;
+        //     EnterFailSafeMode();
+        //     Land();
+        // }
         if (!uavVrpn->IsTracked(500)) {
             Thread::Err("VRPN, uav lost\n");
             vrpnLost=true;
@@ -386,27 +403,29 @@ void ctrl1::SignalEvent(Event_t event) {
         vrpnLost=false;
         behaviourMode=BehaviourMode_t::Default;
         break;
+    default:
+        break;
     }
 }
 
 
 void ctrl1::ExtraCheckPushButton(void) {
-    if(start_prueba1->Clicked() && (behaviourMode!=BehaviourMode_t::control)) {
+    if(start_prueba1->Clicked() && (behaviourMode!=BehaviourMode_t::Custom)) {
         Startctrl1();
     }
 
-    if(stop_prueba1->Clicked() && (behaviourMode==BehaviourMode_t::control)) {
+    if(stop_prueba1->Clicked() && (behaviourMode==BehaviourMode_t::Custom)) {
         Stopctrl1();
     }
 }
 
 void ctrl1::ExtraCheckJoystick(void) {
     //R1
-    if(GetTargetController()->IsButtonPressed(9) && (behaviourMode!=BehaviourMode_t::control)) {
+    if(GetTargetController()->IsButtonPressed(9) && (behaviourMode!=BehaviourMode_t::Custom)) {
         Startctrl1();
     }
     //L1
-    if(GetTargetController()->IsButtonPressed(6) && (behaviourMode==BehaviourMode_t::control)) {
+    if(GetTargetController()->IsButtonPressed(6) && (behaviourMode==BehaviourMode_t::Custom)) {
         Stopctrl1();
     }
     
@@ -442,9 +461,11 @@ void ctrl1::Startctrl1(void) {
         //     l2->SetText("Control: Sliding force-position");
         //     Thread::Info("Sliding force-position\n");
         //     break;
+        default:
+            break;
     }
 
-    behaviourMode=BehaviourMode_t::control;
+    behaviourMode=BehaviourMode_t::Custom;
 }
 
 void ctrl1::Stopctrl1(void) {
@@ -462,8 +483,8 @@ void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vec
     
     switch(position_behavior->CurrentIndex()){
     case 0:
-        // regulation
-        xid = Vector3Df(xd->Value(),yd->Value(),zd->Value());
+    // regulation
+    xid = Vector3Df(static_cast<float>(xd->Value()), static_cast<float>(yd->Value()), static_cast<float>(zd->Value()));
         xidp = Vector3Df(0,0,0);
         xidpp = Vector3Df(0,0,0);
         xidppp = Vector3Df(0,0,0);
@@ -471,75 +492,93 @@ void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vec
     
     case 1:
         // tracking
-        switch(xd_behavior->CurrentIndex()){
+    switch(xd_behavior->CurrentIndex()){
         case 0:
             // regulation
-            xid.x = xd->Value();
+            xid.x = static_cast<float>(xd->Value());
             xidp.x = 0;
             xidpp.x = 0;
             xidppp.x = 0;
             break;
         case 1:
             // sin
-            xid.x = ax->Value()*sin(wx->Value()*tactual)+bx->Value();
-            xidp.x = ax->Value()*wx->Value()*cos(wx->Value()*tactual);
-            xidpp.x = -ax->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual);
-            xidppp.x = -ax->Value()*wx->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual);
+            xid.x = static_cast<float>((ax->Value()*sin(wx->Value()*tactual))+bx->Value());
+            xidp.x = static_cast<float>(ax->Value()*wx->Value()*cos(wx->Value()*tactual));
+            xidpp.x = static_cast<float>(-ax->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual));
+            xidppp.x = static_cast<float>(-ax->Value()*wx->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual));
             break;
         case 2:
             // cos
-            xid.x = ax->Value()*cos(wx->Value()*tactual)+bx->Value();
-            xidp.x = -ax->Value()*wx->Value()*sin(wx->Value()*tactual);
-            xidpp.x = -ax->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual);
-            xidppp.x = ax->Value()*wx->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual);
+            xid.x = static_cast<float>((ax->Value()*cos(wx->Value()*tactual))+bx->Value());
+            xidp.x = static_cast<float>(-ax->Value()*wx->Value()*sin(wx->Value()*tactual));
+            xidpp.x = static_cast<float>(-ax->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual));
+            xidppp.x = static_cast<float>(ax->Value()*wx->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual));
+            break;
+        default:
+            xid.x = static_cast<float>(xd->Value());
+            xidp.x = 0.0F;
+            xidpp.x = 0.0F;
+            xidppp.x = 0.0F;
             break;
         }
 
-        switch(yd_behavior->CurrentIndex()){
+    switch(yd_behavior->CurrentIndex()){
         case 0:
             // regulation
-            xid.y = yd->Value();
+            xid.y = static_cast<float>(yd->Value());
             xidp.y = 0;
             xidpp.y = 0;
             xidppp.y = 0;
             break;
         case 1:
             // sin
-            xid.y = ay->Value()*sin(wy->Value()*tactual)+by->Value();
-            xidp.y = ay->Value()*wy->Value()*cos(wy->Value()*tactual);
-            xidpp.y = -ay->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual);
-            xidppp.y = -ay->Value()*wy->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual);
+            xid.y = static_cast<float>((ay->Value()*sin(wy->Value()*tactual))+by->Value());
+            xidp.y = static_cast<float>(ay->Value()*wy->Value()*cos(wy->Value()*tactual));
+            xidpp.y = static_cast<float>(-ay->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual));
+            xidppp.y = static_cast<float>(-ay->Value()*wy->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual));
             break;
         case 2:
             // cos
-            xid.y = ay->Value()*cos(wy->Value()*tactual)+by->Value();
-            xidp.y = -ay->Value()*wy->Value()*sin(wy->Value()*tactual);
-            xidpp.y = -ay->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual);
-            xidppp.y = ay->Value()*wy->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual);
+            xid.y = static_cast<float>((ay->Value()*cos(wy->Value()*tactual))+by->Value());
+            xidp.y = static_cast<float>(-ay->Value()*wy->Value()*sin(wy->Value()*tactual));
+            xidpp.y = static_cast<float>(-ay->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual));
+            xidppp.y = static_cast<float>(ay->Value()*wy->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual));
+            break;
+        default:
+            xid.y = static_cast<float>(yd->Value());
+            xidp.y = 0.0F;
+            xidpp.y = 0.0F;
+            xidppp.y = 0.0F;
             break;
         }
 
-        switch(zd_behavior->CurrentIndex()){
+    switch(zd_behavior->CurrentIndex()){
         case 0:
             // regulation
-            xid.z = zd->Value();
+            xid.z = static_cast<float>(zd->Value());
             xidp.z = 0;
             xidpp.z = 0;
             xidppp.z = 0;
             break;
         case 1:
             // sin
-            xid.z = az->Value()*sin(wz->Value()*tactual)+bz->Value();
-            xidp.z = az->Value()*wz->Value()*cos(wz->Value()*tactual);
-            xidpp.z = -az->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual);
-            xidppp.z = -az->Value()*wz->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual);
+            xid.z = static_cast<float>((az->Value()*sin(wz->Value()*tactual))+bz->Value());
+            xidp.z = static_cast<float>(az->Value()*wz->Value()*cos(wz->Value()*tactual));
+            xidpp.z = static_cast<float>(-az->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual));
+            xidppp.z = static_cast<float>(-az->Value()*wz->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual));
             break;
         case 2:
             // cos
-            xid.z = az->Value()*cos(wz->Value()*tactual)+bz->Value();
-            xidp.z = -az->Value()*wz->Value()*sin(wz->Value()*tactual);
-            xidpp.z = -az->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual);
-            xidppp.z = az->Value()*wz->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual);
+            xid.z = static_cast<float>((az->Value()*cos(wz->Value()*tactual))+bz->Value());
+            xidp.z = static_cast<float>(-az->Value()*wz->Value()*sin(wz->Value()*tactual));
+            xidpp.z = static_cast<float>(-az->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual));
+            xidppp.z = static_cast<float>(az->Value()*wz->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual));
+            break;
+        default:
+            xid.z = static_cast<float>(zd->Value());
+            xidp.z = 0.0F;
+            xidpp.z = 0.0F;
+            xidppp.z = 0.0F;
             break;
         }
         break;
@@ -556,70 +595,70 @@ void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vec
     }
 }
 
-void ctrl1::force_reference(Vector3Df &fd, float tactual){
+// void ctrl1::force_reference(Vector3Df &fd, float tactual){
     
-    switch(force_behavior->CurrentIndex()){
-    case 0:
-        // regulation
-        fd = Vector3Df(fxd->Value(),fyd->Value(),fzd->Value());
-        break;
+//     switch(force_behavior->CurrentIndex()){
+//     case 0:
+//         // regulation
+//         fd = Vector3Df(fxd->Value(),fyd->Value(),fzd->Value());
+//         break;
     
-    case 1:
-        // tracking
-        switch(fx_behavior->CurrentIndex()){
-        case 0:
-            // regulation
-            fd.x = fxd->Value();
-            break;
-        case 1:
-            // sin
-            fd.x = afx->Value()*sin(wfx->Value()*tactual)+bfx->Value();
-            break;
-        case 2:
-            // cos
-            fd.x = afx->Value()*cos(wfx->Value()*tactual)+bfx->Value();
-            break;
-        }
+//     case 1:
+//         // tracking
+//         switch(fx_behavior->CurrentIndex()){
+//         case 0:
+//             // regulation
+//             fd.x = fxd->Value();
+//             break;
+//         case 1:
+//             // sin
+//             fd.x = afx->Value()*sin(wfx->Value()*tactual)+bfx->Value();
+//             break;
+//         case 2:
+//             // cos
+//             fd.x = afx->Value()*cos(wfx->Value()*tactual)+bfx->Value();
+//             break;
+//         }
 
-        switch(fy_behavior->CurrentIndex()){
-        case 0:
-            // regulation
-            fd.y = fyd->Value();
-            break;
-        case 1:
-            // sin
-            fd.y = afy->Value()*sin(wfy->Value()*tactual)+bfy->Value();
-            break;
-        case 2:
-            // cos
-            fd.y = afy->Value()*cos(wfy->Value()*tactual)+bfy->Value();
-            break;
-        }
+//         switch(fy_behavior->CurrentIndex()){
+//         case 0:
+//             // regulation
+//             fd.y = fyd->Value();
+//             break;
+//         case 1:
+//             // sin
+//             fd.y = afy->Value()*sin(wfy->Value()*tactual)+bfy->Value();
+//             break;
+//         case 2:
+//             // cos
+//             fd.y = afy->Value()*cos(wfy->Value()*tactual)+bfy->Value();
+//             break;
+//         }
 
-        switch(fz_behavior->CurrentIndex()){
-        case 0:
-            // regulation
-            fd.z = fzd->Value();
-            break;
-        case 1:
-            // sin
-            fd.z = afz->Value()*sin(wfz->Value()*tactual)+bfz->Value();
-            break;
-        case 2:
-            // cos
-            fd.z = afz->Value()*cos(wfz->Value()*tactual)+bfz->Value();
-            break;
-        }
-        break;
+//         switch(fz_behavior->CurrentIndex()){
+//         case 0:
+//             // regulation
+//             fd.z = fzd->Value();
+//             break;
+//         case 1:
+//             // sin
+//             fd.z = afz->Value()*sin(wfz->Value()*tactual)+bfz->Value();
+//             break;
+//         case 2:
+//             // cos
+//             fd.z = afz->Value()*cos(wfz->Value()*tactual)+bfz->Value();
+//             break;
+//         }
+//         break;
     
-    case 2:
-        // trajectory
-        break;
-    default:
-        fd = Vector3Df(0,0,0);
-        break;
-    }
-}
+//     case 2:
+//         // trajectory
+//         break;
+//     default:
+//         fd = Vector3Df(0,0,0);
+//         break;
+//     }
+// }
 
 
 void ctrl1::sliding_ctrl(Euler &torques){
@@ -632,7 +671,8 @@ void ctrl1::sliding_ctrl(Euler &torques){
 
     //Printf("ref: %f ms\n", (float)tf/1000000);
 
-    Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
+    Vector3Df uav_pos;
+    Vector3Df uav_vel; // in VRPN coordinate system
     Quaternion uav_quat;
 
     
@@ -648,10 +688,12 @@ void ctrl1::sliding_ctrl(Euler &torques){
     
     Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
-    float refAltitude, refVerticalVelocity;
+    float refAltitude = NAN;
+    float refVerticalVelocity = NAN;
     GetDefaultReferenceAltitude(refAltitude, refVerticalVelocity);
     
-    float z, zp;
+    float z = NAN;
+    float zp = NAN;
     
     AltitudeValues(z,zp);
     
@@ -660,6 +702,7 @@ void ctrl1::sliding_ctrl(Euler &torques){
     u_sliding->SetValues(ze,zp,currentAngularRates,refAngularRates,currentQuaternion,refQuaternion);
     
     u_sliding->Update(GetTime());
+    printf("update\n");
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
@@ -673,11 +716,15 @@ void ctrl1::sliding_ctrl(Euler &torques){
 }
 
 void ctrl1::sliding_ctrl_pos(Euler &torques){
-    float tactual=double(GetTime())/1000000000-u_sliding_pos->t0;
-    //printf("t: %f\n",tactual);
-    Vector3Df xid, xidp, xidpp, xidppp;
+    float tactual=(double(GetTime())/1000000000)-(u_sliding_pos->t0);
+    Printf("t: %f\n",tactual);
+    Vector3Df xid;
+    Vector3Df xidp;
+    Vector3Df xidpp;
+    Vector3Df xidppp;
 
-    Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
+    Vector3Df uav_pos;
+    Vector3Df uav_vel;
     Quaternion uav_quat;
 
     //flair::core::Time ti = GetTime();

@@ -107,6 +107,7 @@ private:
     Eigen::Vector3f sgnpos_p, sgnpos, sgnori_p, sgnori;
 
     Eigen::Matrix3f I = Eigen::Matrix3f::Identity(3,3);
+    Eigen::Vector3f nu_t0;
 
     //flair::core::Vector3ff sgnori_p, sgnori;
     

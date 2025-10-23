@@ -90,6 +90,7 @@ private:
     bool first_update;
     
     Eigen::Vector3f sgnori_p, sgnori;
+    Eigen::Vector3f nu_t0;
     
     
 };

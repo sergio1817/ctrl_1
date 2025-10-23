@@ -1,0 +1,48 @@
+name: Flair CI
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Flair
+      run: |
+        mkdir $HOME/flair
+        # variable for Flair
+        export FLAIR_ROOT=$HOME/flair
+        # flair binaries
+        export PATH="$PATH":"$FLAIR_ROOT"/flair-src/bin
+        # flair completion script
+        source "$FLAIR_ROOT"/flair-src/scripts/flair_completion.sh 
+
+        sudo apt install python-is-python3 git mesa-utils libgl1-mesa-dev build-essential cmake file
+        
+        # clone flair
+        cd $FLAIR_ROOT
+        git clone https://gitlab.utc.fr/uav-hds/flair/flair-src.git
+
+        $FLAIR_ROOT/flair-src/scripts/install_toolchains.sh
+
+        $FLAIR_ROOT/flair-src/scripts/flair_compile_all.sh
+
+    - name: Build project
+      run: |
+        # variable for Flair
+        export FLAIR_ROOT=$HOME/flair
+        cd $FLAIR_ROOT/
+        mkdir -p src/ctrl1
+        cd src/ctrl1
+        git clone https://github.com/sergio1817/ctrl_1.git
+        #
+        mkdir -p $FLAIR_ROOT/flair-build/build_usr/ctrl1
+        cd $FLAIR_ROOT/flair-build/build_usr/ctrl1
+        $FLAIR_ROOT/flair-src/scripts/cmake_codelite_outofsource.sh $FLAIR_ROOT/src/ctrl1
+        cd build
+        NB_THREADS=$(nproc)
+        make -j $NB_THREADS
+
+
