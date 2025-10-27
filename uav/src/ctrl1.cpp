@@ -298,7 +298,7 @@ ctrl1::~ctrl1() {
         u_sliding = nullptr; 
     }
     if (u_sliding_pos != nullptr) { delete u_sliding_pos; u_sliding_pos = nullptr; }
-    if (u_sliding_force != nullptr) { delete u_sliding_force; u_sliding_force = nullptr; }
+    //if (u_sliding_force != nullptr) { delete u_sliding_force; u_sliding_force = nullptr; }
 
     // delete VRPN objects if they were created
     if (uavVrpn != nullptr) {
@@ -717,7 +717,7 @@ void ctrl1::sliding_ctrl(Euler &torques){
 
 void ctrl1::sliding_ctrl_pos(Euler &torques){
     float tactual=(double(GetTime())/1000000000)-(u_sliding_pos->t0);
-    Printf("t: %f\n",tactual);
+    //Printf("t: %f\n",tactual);
     Vector3Df xid;
     Vector3Df xidp;
     Vector3Df xidpp;

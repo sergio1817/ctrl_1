@@ -1,5 +1,6 @@
 #include "NMethods.h"
 #include <Eigen/Dense>
+#include <cmath>
 #include <math.h>
 
 
@@ -155,4 +156,86 @@ float Levant_diff::sign_(const float a){
         return signth(a, p);
     else
         return sign(a);
+}
+
+
+
+
+Levant3::Levant3(uint8_t _mode, float _L, double _p): mode(_mode), L(_L), p(_p) {
+}
+
+Levant3::~Levant3() {}
+
+void Levant3::setParam(double L, double p) {
+    this->L = L;
+    this->p = p;
+}
+
+void Levant3::Reset() {
+    z0 = 0.0F;
+    z1 = 0.0F;
+    z2 = 0.0F;
+    z3 = 0.0F;
+
+    z0_1 = Eigen::Vector3f::Zero();
+    z1_1 = Eigen::Vector3f::Zero();
+    z2_1 = Eigen::Vector3f::Zero();
+    z3_1 = Eigen::Vector3f::Zero();
+}
+
+double Levant3::compute(double f, float dt) {
+    double nu0 = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0-f),3.0/4.0F)*sign_(z0-f)) + z1;
+    double nu1 = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1-nu0),2.0/3.0F)*sign_(z1-nu0)) + z2;
+    double nu2 = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2-nu1),1.0/2.0F)*sign_(z2-nu1)) + z3;
+    double z3p = -1.1F*L*sign_(z3-nu2);
+
+    z0 = rk4(function1d,z0,nu0,dt);
+    z1 = rk4(function1d,z1,nu1,dt);
+    z2 = rk4(function1d,z2,nu2,dt);
+    z3 = rk4(function1d,z3,z3p,dt);
+
+    //fp = nu0;
+    //fp = nu0; // Compute the first derivative (velocity)
+
+    return nu0;
+}
+
+Eigen::Vector3f Levant3::compute(const Eigen::Vector3f f, float dt) {
+    Eigen::Vector3f nu0;
+    Eigen::Vector3f nu1;
+    Eigen::Vector3f nu2;
+    Eigen::Vector3f z3p;
+
+    nu0(0) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(0)-f(0)),3.0/4.0F)*sign_(z0_1(0)-f(0))) + z0_1(0);
+    nu0(1) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(1)-f(1)),3.0/4.0F)*sign_(z0_1(1)-f(1))) + z1_1(1);
+    nu0(2) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(2)-f(2)),3.0/4.0F)*sign_(z0_1(2)-f(2))) + z1_1(2);
+
+    nu1(0) = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1_1(0)-nu0(0)),2.0/3.0F)*sign_(z1_1(0)-nu0(0))) + z2_1(0);
+    nu1(1) = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1_1(1)-nu0(1)),2.0/3.0F)*sign_(z1_1(1)-nu0(1))) + z2_1(1);
+    nu1(2) = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1_1(2)-nu0(2)),2.0/3.0F)*sign_(z1_1(2)-nu0(2))) + z2_1(2);
+
+    nu2(0) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(0)-nu1(0)),1.0/2.0F)*sign_(z2_1(0)-nu1(0))) + z3_1(0);
+    nu2(1) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(1)-nu1(1)),1.0/2.0F)*sign_(z2_1(1)-nu1(1))) + z3_1(1);
+    nu2(2) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(2)-nu1(2)),1.0/2.0F)*sign_(z2_1(2)-nu1(2))) + z3_1(2);
+
+    z3p(0) = -1.1F*L*sign_(z3_1(0)-nu2(0));
+    z3p(1) = -1.1F*L*sign_(z3_1(1)-nu2(1));
+    z3p(2) = -1.1F*L*sign_(z3_1(2)-nu2(2));
+
+    z0_1 = rk4_vec(z0_1,nu0,dt);
+    z1_1 = rk4_vec(z1_1,nu1,dt);
+    z2_1 = rk4_vec(z2_1,nu2,dt);
+    z3_1 = rk4_vec(z3_1,z3p,dt);
+
+    return z0_1;
+}
+
+double Levant3::sign_(const double val){
+    if(mode == 0){
+        return sign(val);
+    }
+    if(mode == 1){
+        return signth(val, p);
+    }
+    return sign(val);
 }

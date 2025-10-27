@@ -70,8 +70,8 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     GroupBox *mot = new GroupBox(reglages_groupbox->NewRow(), "Motores");
 
     T = new DoubleSpinBox(num->NewRow(), "period, 0 for auto", " s", 0, 1, 0.01,3);
-    alpha_l = new DoubleSpinBox(num->NewRow(), "alpha Levant:", 0, 500, 0.001, 3);
-    lamb_l = new DoubleSpinBox(num->LastRowLastCol(), "lambda Levant:", 0, 500, 0.001, 3);
+    alpha_l = new DoubleSpinBox(num->NewRow(), "alpha Levant:", 0, 5000, 0.001, 3);
+    lamb_l = new DoubleSpinBox(num->LastRowLastCol(), "lambda Levant:", 0, 5000, 0.001, 3);
     levantd = new CheckBox(num->LastRowLastCol(), "Levant");
 
     gamma_roll = new DoubleSpinBox(ori->NewRow(), "gamma_roll:", 0, 500, 0.001, 3);
@@ -97,6 +97,7 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     Kp_y = new DoubleSpinBox(pos->LastRowLastCol(), "Kp_y:", 0, 50000, 0.5, 3);
     Kp_z = new DoubleSpinBox(pos->LastRowLastCol(), "Kp_z:", 0, 50000, 0.5, 3);
     
+    
 
     sat_r = new DoubleSpinBox(mot->NewRow(), "sat roll:", 0, 1, 0.1);
     sat_p = new DoubleSpinBox(mot->LastRowLastCol(), "sat pitch:", 0, 1, 0.1);
@@ -108,11 +109,13 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     
     m = new DoubleSpinBox(pos->NewRow(),"m",0,2000,0.001,3);
     g = new DoubleSpinBox(pos->LastRowLastCol(),"g",-10,10,0.01,3);
-    lp = new Label(pos->LastRowLastCol(), "Latencia pos");
+    p_1 = new DoubleSpinBox(pos->LastRowLastCol(), "p:", 0, 50000, 1, 3);
+    //lp = new Label(pos->LastRowLastCol(), "Latencia pos");
     
     t0 = double(GetTime())/1000000000;
 
     levant = Levant_diff("tanh", 8, 6, 3000);
+    levant3 = Levant3(1, 8, 3000.0);
 
     sgnpos_p << 0,0,0;
     sgnpos << 0,0,0;
@@ -133,6 +136,7 @@ void Sliding_pos::Reset(void) {
     sgnori << 0,0,0;
 
     levant.Reset();
+    levant3.Reset();
 
     // sgnpos2 = Vector3ff(0,0,0);
     // sgn2 = Vector3ff(0,0,0);
@@ -349,9 +353,19 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     flair::core::Time t0_p = GetTime();
 
-    Eigen::Vector3f nup = xiep + alphap*xie;
+    Eigen::Vector3f nup1 = xiep + alphap*xie;
 
-    sgnpos_p = signth(nup,1);
+    if (first_update) {
+        nup_t0 = nup1;
+    }
+
+    Eigen::Vector3f nupd = nup_t0*exp(-k->Value()*(tactual));
+
+    Eigen::Vector3f nup = nup1 - nupd;
+
+    float p1 = p_1->Value();
+
+    sgnpos_p = signth(nup,p1);
     sgnpos = rk4_vec(sgnpos, sgnpos_p, delta_t);
 
     Eigen::Vector3f nurp = nup + gammap*sgnpos;
@@ -364,8 +378,8 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Trs = u.norm();
 
     Eigen::Vector3f Qe3 = q.toRotationMatrix()*ez;
-    
-    Eigen::Vector3f Lambpv(powf(sech(nup(0)*1),2), powf(sech(nup(1)*1),2), powf(sech(nup(2)*1),2) );
+
+    Eigen::Vector3f Lambpv(p1*powf(sech(nup(0)*p1),2), p1*powf(sech(nup(1)*p1),2), p1*powf(sech(nup(2)*p1),2) );
     Eigen::Matrix3f Lambp = Lambpv.asDiagonal();
 
     //Eigen::Vector3f vec(sin(tactual), sin(tactual), sin(tactual));
@@ -381,8 +395,10 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f up;
     // Eigen::Vector3f ud;
     if(levantd->IsChecked()){
-        levant.setParam(alpha_l->Value(), lamb_l->Value());
-        up = levant.Compute(u,delta_t);
+        //levant.setParam(alpha_l->Value(), lamb_l->Value());
+        //up = levant.Compute(u,delta_t);
+        levant3.setParam(alpha_l->Value(), lamb_l->Value());
+        up = levant3.compute(u,delta_t);
         //ud = levant.Compute(vec,delta_t);
     }else{
         up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 

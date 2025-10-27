@@ -10,6 +10,8 @@
 #define NMETHODS_H
 
 #include <Eigen/Dense>
+#include <cstdint>
+#include <utility>
 
 
 /*!
@@ -53,6 +55,36 @@ float sigmoide(const float a, const float d);
 float signth(const float a, const float p);
 
 Eigen::Vector3f signth(const Eigen::Vector3f a, const float p);
+
+
+class Levant3{
+public:
+    explicit Levant3(uint8_t _mode = 1, float _L = 1.0F, double _p = 300.0);
+    ~Levant3();
+
+    void setParam(double L, double p);
+
+    double compute(double f, float dt);
+    Eigen::Vector3f compute(const Eigen::Vector3f f, float dt);
+
+    void Reset();
+
+private:
+    uint8_t mode;
+    double L;
+    double p;
+    double z0 = 0.0F; // Initial condition for z0
+    double z1 = 0.0F; // Initial condition for z1
+    double z2 = 0.0F; // Initial condition for z2
+    double z3 = 0.0F; // Initial condition for z3
+
+    Eigen::Vector3f z0_1 = Eigen::Vector3f::Zero(); // Initial condition for z0
+    Eigen::Vector3f z1_1 = Eigen::Vector3f::Zero(); // Initial condition for z1
+    Eigen::Vector3f z2_1 = Eigen::Vector3f::Zero(); // Initial condition for z2
+    Eigen::Vector3f z3_1 = Eigen::Vector3f::Zero(); // Initial condition for z3
+
+    double sign_(double val);
+};
 
 
 

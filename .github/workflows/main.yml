@@ -1,62 +1,62 @@
-name: Flair CI
+# name: Flair CI
 
-on: [push]
+# on: [push]
 
-jobs:
-  build:
+# jobs:
+#   build:
 
-    runs-on: ubuntu-24.04
+#     runs-on: ubuntu-24.04
 
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Flair
-      run: |
-        mkdir $HOME/flair
-        # variable for Flair
-        export FLAIR_ROOT=$HOME/flair
-        echo "FLAIR_ROOT=$HOME/flair" >> "$GITHUB_ENV"
+#     steps:
+#     - uses: actions/checkout@v2
+#     - name: Set up Flair
+#       run: |
+#         mkdir $HOME/flair
+#         # variable for Flair
+#         export FLAIR_ROOT=$HOME/flair
+#         echo "FLAIR_ROOT=$HOME/flair" >> "$GITHUB_ENV"
 
-        source ~/.bashrc
+#         source ~/.bashrc
 
-        sudo apt install python-is-python3 git mesa-utils libgl1-mesa-dev build-essential cmake file
+#         sudo apt install python-is-python3 git mesa-utils libgl1-mesa-dev build-essential cmake file
         
-        # clone flair
-        cd $FLAIR_ROOT
-        git clone https://gitlab.utc.fr/uav-hds/flair/flair-src.git
+#         # clone flair
+#         cd $FLAIR_ROOT
+#         git clone https://gitlab.utc.fr/uav-hds/flair/flair-src.git
 
-        # flair binaries
-        export PATH="$PATH":"$FLAIR_ROOT"/flair-src/bin
-        echo "$FLAIR_ROOT/flair-src/bin" >> "$GITHUB_PATH"
-        # flair completion script
-        source "$FLAIR_ROOT"/flair-src/scripts/flair_completion.sh 
+#         # flair binaries
+#         export PATH="$PATH":"$FLAIR_ROOT"/flair-src/bin
+#         echo "$FLAIR_ROOT/flair-src/bin" >> "$GITHUB_PATH"
+#         # flair completion script
+#         source "$FLAIR_ROOT"/flair-src/scripts/flair_completion.sh 
 
-        $FLAIR_ROOT/flair-src/scripts/install_toolchains.sh
+#         $FLAIR_ROOT/flair-src/scripts/install_toolchains.sh
 
-        echo "OECORE_CMAKE_TOOLCHAINS= \"core2_64\" " >> "$GITHUB_ENV"
-        echo "OECORE_CMAKE_CORE2_64_TOOLCHAIN= \"/opt/robomap3/2.1.3/core2-64/toolchain.cmake\" >> "$GITHUB_ENV"
-        echo "OECORE_CORE2_64_NATIVE_SYSROOT= \"/opt/robomap3/2.1.3/core2-64/sysroots/x86_64-pokysdk-linux\" >> "$GITHUB_ENV"
+#         echo "OECORE_CMAKE_TOOLCHAINS= \"core2_64\" " >> "$GITHUB_ENV"
+#         echo "OECORE_CMAKE_CORE2_64_TOOLCHAIN= \"/opt/robomap3/2.1.3/core2-64/toolchain.cmake\" >> "$GITHUB_ENV"
+#         echo "OECORE_CORE2_64_NATIVE_SYSROOT= \"/opt/robomap3/2.1.3/core2-64/sysroots/x86_64-pokysdk-linux\" >> "$GITHUB_ENV"
 
-        $FLAIR_ROOT/flair-src/scripts/flair_compile_all.sh
+#         $FLAIR_ROOT/flair-src/scripts/flair_compile_all.sh
 
-    - name: Install flair
-      run: |
-        export FLAIR_ROOT=$HOME/flair
-        $FLAIR_ROOT/flair-src/scripts/flair_compile_all.sh
+#     - name: Install flair
+#       run: |
+#         export FLAIR_ROOT=$HOME/flair
+#         $FLAIR_ROOT/flair-src/scripts/flair_compile_all.sh
 
-    - name: Build project
-      run: |
-        # variable for Flair
-        export FLAIR_ROOT=$HOME/flair
-        cd $FLAIR_ROOT/
-        mkdir -p src/ctrl1
-        cd src/ctrl1
-        git clone https://github.com/sergio1817/ctrl_1.git
-        #
-        mkdir -p $FLAIR_ROOT/flair-build/build_usr/ctrl1
-        cd $FLAIR_ROOT/flair-build/build_usr/ctrl1
-        $FLAIR_ROOT/flair-src/scripts/cmake_codelite_outofsource.sh $FLAIR_ROOT/src/ctrl1
-        cd build
-        NB_THREADS=$(nproc)
-        make -j $NB_THREADS
+#     - name: Build project
+#       run: |
+#         # variable for Flair
+#         export FLAIR_ROOT=$HOME/flair
+#         cd $FLAIR_ROOT/
+#         mkdir -p src/ctrl1
+#         cd src/ctrl1
+#         git clone https://github.com/sergio1817/ctrl_1.git
+#         #
+#         mkdir -p $FLAIR_ROOT/flair-build/build_usr/ctrl1
+#         cd $FLAIR_ROOT/flair-build/build_usr/ctrl1
+#         $FLAIR_ROOT/flair-src/scripts/cmake_codelite_outofsource.sh $FLAIR_ROOT/src/ctrl1
+#         cd build
+#         NB_THREADS=$(nproc)
+#         make -j $NB_THREADS
 
 

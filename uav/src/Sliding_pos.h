@@ -85,11 +85,12 @@ public:
 private:
     flair::core::Matrix *state;
     Levant_diff levant;
+    Levant3 levant3;
 
     float sech(float value);
 
     flair::gui::CheckBox *levantd;
-    flair::gui::DoubleSpinBox *T, *gamma, *k, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p, *km_z;
+    flair::gui::DoubleSpinBox *T, *gamma, *k, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p, *p_1, *km_z;
     flair::gui::DoubleSpinBox *gamma_roll, *gamma_pitch, *gamma_yaw, *gamma_x, *gamma_y, *gamma_z;
     flair::gui::DoubleSpinBox *alpha_roll, *alpha_pitch, *alpha_yaw, *alpha_x, *alpha_y, *alpha_z;
     flair::gui::DoubleSpinBox *Kd_roll, *Kd_pitch, *Kd_yaw, *Kd_x, *Kd_y, *Kd_z;
@@ -107,7 +108,7 @@ private:
     Eigen::Vector3f sgnpos_p, sgnpos, sgnori_p, sgnori;
 
     Eigen::Matrix3f I = Eigen::Matrix3f::Identity(3,3);
-    Eigen::Vector3f nu_t0;
+    Eigen::Vector3f nu_t0, nup_t0;
 
     //flair::core::Vector3ff sgnori_p, sgnori;
     
