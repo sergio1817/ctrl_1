@@ -1,4 +1,6 @@
 .vscode/
+.idea/
+log/
 gen_flair_env.sh
 gen_flair_enva.sh
 .clangd
