@@ -413,12 +413,12 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     //std::cout << "uph: " << uph << std::endl;
 
 
-    Eigen::Quaternionf qd( (0.5)*sqrtf(-2*uh(2)+2) , uh(1)/sqrtf(-2*uh(2)+2), -uh(0)/sqrtf(-2*uh(2)+2), 0);
+    Eigen::Quaternionf qd( (0.5F)*sqrtf((-2*uh(2))+2), uh(1)/sqrtf((-2*uh(2))+2), -uh(0)/sqrtf((-2*uh(2))+2), 0);
 
-    // Eigen::Quaternionf qdp(-(0.5)*(uph(2)/sqrtf(-2*uh(2)+2)),
-    //                         (uph(1)/sqrtf(-2*uh(2)+2)) + ((uh(1)*uph(2))/powf(-2*uh(2)+2,1.5)),
-    //                         -(uph(0)/sqrtf(-2*uh(2)+2)) - ((uh(0)*uph(2))/powf(-2*uh(2)+2,1.5)),
-    //                         0);
+    Eigen::Quaternionf qdp(-(0.5F)*(uph(2)/sqrtf((-2*uh(2))+2)),
+                            (uph(1)/sqrtf((-2*uh(2))+2)) + ((uh(1)*uph(2))/powf((-2*uh(2))+2,1.5)),
+                            -(uph(0)/sqrtf((-2*uh(2))+2)) - ((uh(0)*uph(2))/powf((-2*uh(2))+2,1.5)),
+                            0);
 
     Quaternion qd2 = Quaternion(qd.w(),qd.x(),qd.y(),qd.z());
     Euler eta = qd2.ToEuler();
@@ -428,11 +428,11 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     //std::cout<<"qe: " << qe.coeffs() << std::endl;
 
-    Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
-                        -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
-                        (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
+    // Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
+    //                     -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
+    //                     (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
 
-    //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
+    Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
 
     //std::cout<<"w: " << w << std::endl;
     //std::cout<<"wd: " << wd << std::endl;

@@ -33,7 +33,7 @@ halt
 
 
 - Enviar programas
-scp <archivo> root@192.168.147.33:bin/arm
+scp -O <archivo> root@192.168.147.33:bin/arm
 scp <archivo> timmy:bin/arm
 
 

@@ -41,11 +41,11 @@ int main(int argc, char *argv[]){
 
 	FrameworkManager *manager;
 	manager = new FrameworkManager(name);
-	manager->SetupConnection(address, port, (Time)30000000000); // 15s timeout 
+	manager->SetupConnection(address, port, (Time)30000000000); // 30s timeout 
 	manager->SetupUserInterface(xml_file);
 	manager->SetupLogger(log_path);
 
-	Uav *drone = CreateUav(name, uav_type);
+	Uav *drone = CreateUav(name, uav_type, "use_camv=false use_camh=false");
 	TargetEthController *controller = new TargetEthController("Dualshock3", ds3port);
 	//TargetEthJR3 *sensor = new TargetEthJR3("JR3", jr3port, 80);
 	ctrl1 *demo = new ctrl1(controller);
@@ -53,6 +53,9 @@ int main(int argc, char *argv[]){
 	demo->Start();
 	demo->Join();
 
+	//delete demo;
+	delete controller;
+	//delete drone;
 	delete manager;
 }
 

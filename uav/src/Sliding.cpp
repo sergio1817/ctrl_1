@@ -203,7 +203,7 @@ void Sliding::UpdateFrom(const io_data *data) {
 
     input->ReleaseMutex();
 
-    printf("in\n");
+    //printf("in\n");
     
     Euler currentAngles = q2.ToEuler();
 
@@ -259,7 +259,7 @@ void Sliding::UpdateFrom(const io_data *data) {
     
     Tr = (float)Trs/km->Value();
     
-    printf("torques\n");
+    //printf("torques\n");
     
     tau_roll = -Sat(tau_roll,sat_r->Value());
     tau_pitch = -Sat(tau_pitch,sat_p->Value());

@@ -37,7 +37,7 @@
 #include <ComboBox.h>
 #include <GroupBox.h>
 #include <TabWidget.h>
-#include <math.h>
+//#include <cmath>
 
 using namespace std;
 using namespace flair::core;
@@ -50,14 +50,14 @@ using namespace flair::meta;
 ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behaviourMode(BehaviourMode_t::Default), vrpnLost(false) {
     Uav* uav=GetUav();
 
-    std::string ip_dir;
-    if(uav->GetType()=="x4_simu"){
-        ip_dir = uav->GetDefaultVrpnAddress();
-    } else {
-        ip_dir = "192.168.147.103:3883";
-    }
+    // std::string ip_dir;
+    // if(uav->GetType()=="x4_simu"){
+    //     ip_dir = uav->GetDefaultVrpnAddress();
+    // } else {
+    //     ip_dir = "192.168.147.103:3883";
+    // }
     //ip_dir = "192.168.147.103:3883";
-    VrpnClient* vrpnclient=new VrpnClient("vrpn", ip_dir,80,uav->GetDefaultVrpnConnectionType());
+    VrpnClient* vrpnclient=new VrpnClient("vrpn", uav->GetDefaultVrpnAddress(),80,uav->GetDefaultVrpnConnectionType());
     
     
     if(vrpnclient->ConnectionType()==VrpnClient::Xbee) {
@@ -190,97 +190,97 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     customOrientation=new AhrsData(this,"orientation");
 
 
-    Tab *lawTab3 = new Tab(getFrameworkManager()->GetTabWidget(), "Force");
-    TabWidget *tabWidget3 = new TabWidget(lawTab3->NewRow(), "laws");
+    // Tab *lawTab3 = new Tab(getFrameworkManager()->GetTabWidget(), "Force");
+    // TabWidget *tabWidget3 = new TabWidget(lawTab3->NewRow(), "laws");
     
-    Tab *setupForceTab = new Tab(tabWidget3, "Setup");
-    Tab *slidingTab = new Tab(tabWidget3, "Sliding");
-    Tab *errorsTab = new Tab(tabWidget3, "Graphs");
-    Tab *ctrlfTab = new Tab(tabWidget3, "Control");
-    Tab *outputTab = new Tab(tabWidget3, "Outputs");
+    // Tab *setupForceTab = new Tab(tabWidget3, "Setup");
+    // Tab *slidingTab = new Tab(tabWidget3, "Sliding");
+    // Tab *errorsTab = new Tab(tabWidget3, "Graphs");
+    // Tab *ctrlfTab = new Tab(tabWidget3, "Control");
+    // Tab *outputTab = new Tab(tabWidget3, "Outputs");
 
-    Tab *ref = new Tab(tabWidget3, "Reference force");
+    // Tab *ref = new Tab(tabWidget3, "Reference force");
 
-    GroupBox *forcebox = new GroupBox(ref->NewRow(), "Setup reference");
-    GroupBox *regboxf = new GroupBox(ref->NewRow(), "Setup regulation");
-    GroupBox *trackboxf = new GroupBox(ref->NewRow(), "Setup tracking");
-    GroupBox *trajboxf = new GroupBox(ref->NewRow(), "Setup trajectory");
+    // GroupBox *forcebox = new GroupBox(ref->NewRow(), "Setup reference");
+    // GroupBox *regboxf = new GroupBox(ref->NewRow(), "Setup regulation");
+    // GroupBox *trackboxf = new GroupBox(ref->NewRow(), "Setup tracking");
+    // GroupBox *trajboxf = new GroupBox(ref->NewRow(), "Setup trajectory");
 
-    force_behavior = new ComboBox(forcebox->NewRow(),"Select behavior");
-    force_behavior->AddItem("Regulation");
-    force_behavior->AddItem("Tracking");
-    force_behavior->AddItem("Trajectory");
+    // force_behavior = new ComboBox(forcebox->NewRow(),"Select behavior");
+    // force_behavior->AddItem("Regulation");
+    // force_behavior->AddItem("Tracking");
+    // force_behavior->AddItem("Trajectory");
 
-    fx_behavior = new ComboBox(trackboxf->NewRow(),"Select fxd behavior");
-    fx_behavior->AddItem("Regulation");
-    fx_behavior->AddItem("Sin");
-    fx_behavior->AddItem("Cos");
+    // fx_behavior = new ComboBox(trackboxf->NewRow(),"Select fxd behavior");
+    // fx_behavior->AddItem("Regulation");
+    // fx_behavior->AddItem("Sin");
+    // fx_behavior->AddItem("Cos");
 
-    fy_behavior = new ComboBox(trackboxf->LastRowLastCol(),"Select fyd behavior");
-    fy_behavior->AddItem("Regulation");
-    fy_behavior->AddItem("Sin");
-    fy_behavior->AddItem("Cos");
+    // fy_behavior = new ComboBox(trackboxf->LastRowLastCol(),"Select fyd behavior");
+    // fy_behavior->AddItem("Regulation");
+    // fy_behavior->AddItem("Sin");
+    // fy_behavior->AddItem("Cos");
 
-    fz_behavior = new ComboBox(trackboxf->LastRowLastCol(),"Select fzd behavior");
-    fz_behavior->AddItem("Regulation");
-    fz_behavior->AddItem("Sin");
-    fz_behavior->AddItem("Cos");
+    // fz_behavior = new ComboBox(trackboxf->LastRowLastCol(),"Select fzd behavior");
+    // fz_behavior->AddItem("Regulation");
+    // fz_behavior->AddItem("Sin");
+    // fz_behavior->AddItem("Cos");
 
-    GroupBox *fxkbox = new GroupBox(trackboxf->NewRow(), "fxd");
-    GroupBox *fykbox = new GroupBox(trackboxf->LastRowLastCol(), "fyd");
-    GroupBox *fzkbox = new GroupBox(trackboxf->LastRowLastCol(), "fzd");
+    // GroupBox *fxkbox = new GroupBox(trackboxf->NewRow(), "fxd");
+    // GroupBox *fykbox = new GroupBox(trackboxf->LastRowLastCol(), "fyd");
+    // GroupBox *fzkbox = new GroupBox(trackboxf->LastRowLastCol(), "fzd");
     
-    fxd = new DoubleSpinBox(regboxf->NewRow(), "fx", " N", -10, 10, 0.1, 2);
-    fyd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fy", " N", -10, 10, 0.1, 2);
-    fzd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fz", " N", -10, 10, 0.1, 2);
+    // fxd = new DoubleSpinBox(regboxf->NewRow(), "fx", " N", -10, 10, 0.1, 2);
+    // fyd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fy", " N", -10, 10, 0.1, 2);
+    // fzd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fz", " N", -10, 10, 0.1, 2);
     
-    lfx = new Label(fxkbox->NewRow(), "funcion");
-    lfx->SetText("a*fnc(w*t) + b");
-    afx = new DoubleSpinBox(fxkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
-    wfx = new DoubleSpinBox(fxkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
-    bfx = new DoubleSpinBox(fxkbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
+    // lfx = new Label(fxkbox->NewRow(), "funcion");
+    // lfx->SetText("a*fnc(w*t) + b");
+    // afx = new DoubleSpinBox(fxkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+    // wfx = new DoubleSpinBox(fxkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+    // bfx = new DoubleSpinBox(fxkbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
 
-    lfy = new Label(fykbox->NewRow(), "funcion");
-    lfy->SetText("a*fnc(w*t) + b");
-    afy = new DoubleSpinBox(fykbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
-    wfy = new DoubleSpinBox(fykbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
-    bfy = new DoubleSpinBox(fykbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
+    // lfy = new Label(fykbox->NewRow(), "funcion");
+    // lfy->SetText("a*fnc(w*t) + b");
+    // afy = new DoubleSpinBox(fykbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+    // wfy = new DoubleSpinBox(fykbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+    // bfy = new DoubleSpinBox(fykbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
 
-    lfz = new Label(fzkbox->NewRow(), "funcion");
-    lfz->SetText("a*fnc(w*t) + b");
-    afz = new DoubleSpinBox(fzkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
-    wfz = new DoubleSpinBox(fzkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
-    bfz = new DoubleSpinBox(fzkbox->NewRow(), "Offset (b)", -3, 0, 0.1, 2);
+    // lfz = new Label(fzkbox->NewRow(), "funcion");
+    // lfz->SetText("a*fnc(w*t) + b");
+    // afz = new DoubleSpinBox(fzkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+    // wfz = new DoubleSpinBox(fzkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+    // bfz = new DoubleSpinBox(fzkbox->NewRow(), "Offset (b)", -3, 0, 0.1, 2);
 
-    u_sliding_force = new Sliding_force(setupForceTab->At(0, 0), "u_smc_force");
-    u_sliding_force->UseDefaultPlot(outputTab->At(0, 0));
-    u_sliding_force->UseDefaultPlot2(outputTab->At(0, 1));
-    u_sliding_force->UseDefaultPlot3(outputTab->At(0, 2));
-    u_sliding_force->UseDefaultPlot4(outputTab->At(1, 2));
+    // u_sliding_force = new Sliding_force(setupForceTab->At(0, 0), "u_smc_force");
+    // u_sliding_force->UseDefaultPlot(outputTab->At(0, 0));
+    // u_sliding_force->UseDefaultPlot2(outputTab->At(0, 1));
+    // u_sliding_force->UseDefaultPlot3(outputTab->At(0, 2));
+    // u_sliding_force->UseDefaultPlot4(outputTab->At(1, 2));
 
-    u_sliding_force->UseDefaultPlot8(slidingTab->At(0, 0));
-    u_sliding_force->UseDefaultPlot9(slidingTab->At(0, 1));
-    u_sliding_force->UseDefaultPlot10(slidingTab->At(0, 2));
-    u_sliding_force->UseDefaultPlot11(slidingTab->At(1, 2));
+    // u_sliding_force->UseDefaultPlot8(slidingTab->At(0, 0));
+    // u_sliding_force->UseDefaultPlot9(slidingTab->At(0, 1));
+    // u_sliding_force->UseDefaultPlot10(slidingTab->At(0, 2));
+    // u_sliding_force->UseDefaultPlot11(slidingTab->At(1, 2));
 
-    u_sliding_force->UseDefaultPlot5(errorsTab->At(1, 0));
-    u_sliding_force->UseDefaultPlot6(errorsTab->At(1, 1));
-    u_sliding_force->UseDefaultPlot7(errorsTab->At(1, 2));
+    // u_sliding_force->UseDefaultPlot5(errorsTab->At(1, 0));
+    // u_sliding_force->UseDefaultPlot6(errorsTab->At(1, 1));
+    // u_sliding_force->UseDefaultPlot7(errorsTab->At(1, 2));
 
-    u_sliding_force->UseDefaultPlot12(errorsTab->At(0, 0));
-    u_sliding_force->UseDefaultPlot13(errorsTab->At(0, 1));
-    u_sliding_force->UseDefaultPlot14(errorsTab->At(0, 2));
+    // u_sliding_force->UseDefaultPlot12(errorsTab->At(0, 0));
+    // u_sliding_force->UseDefaultPlot13(errorsTab->At(0, 1));
+    // u_sliding_force->UseDefaultPlot14(errorsTab->At(0, 2));
 
-    u_sliding_force->UseDefaultPlot15(ctrlfTab->At(0, 0));
-    u_sliding_force->UseDefaultPlot16(ctrlfTab->At(0, 1));
-    u_sliding_force->UseDefaultPlot17(ctrlfTab->At(0, 2));
+    // u_sliding_force->UseDefaultPlot15(ctrlfTab->At(0, 0));
+    // u_sliding_force->UseDefaultPlot16(ctrlfTab->At(0, 1));
+    // u_sliding_force->UseDefaultPlot17(ctrlfTab->At(0, 2));
 
-    u_sliding_force->UseDefaultPlot18(ctrlfTab->At(1, 0));
-    u_sliding_force->UseDefaultPlot19(ctrlfTab->At(1, 1));
-    u_sliding_force->UseDefaultPlot20(ctrlfTab->At(1, 2));
+    // u_sliding_force->UseDefaultPlot18(ctrlfTab->At(1, 0));
+    // u_sliding_force->UseDefaultPlot19(ctrlfTab->At(1, 1));
+    // u_sliding_force->UseDefaultPlot20(ctrlfTab->At(1, 2));
 
-    u_sliding_force->UseDefaultPlot22(ctrlfTab->At(2, 0));
-    u_sliding_force->UseDefaultPlot21(ctrlfTab->At(2, 2));
+    // u_sliding_force->UseDefaultPlot22(ctrlfTab->At(2, 0));
+    // u_sliding_force->UseDefaultPlot21(ctrlfTab->At(2, 2));
 
 
     //getFrameworkManager()->AddDeviceToLog(u_sliding);
@@ -688,12 +688,12 @@ void ctrl1::sliding_ctrl(Euler &torques){
     
     Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
-    float refAltitude = NAN;
-    float refVerticalVelocity = NAN;
+    float refAltitude = 0;
+    float refVerticalVelocity = 0;
     GetDefaultReferenceAltitude(refAltitude, refVerticalVelocity);
     
-    float z = NAN;
-    float zp = NAN;
+    float z = 0;
+    float zp = 0;
     
     AltitudeValues(z,zp);
     
@@ -702,7 +702,7 @@ void ctrl1::sliding_ctrl(Euler &torques){
     u_sliding->SetValues(ze,zp,currentAngularRates,refAngularRates,currentQuaternion,refQuaternion);
     
     u_sliding->Update(GetTime());
-    printf("update\n");
+    //printf("update\n");
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     

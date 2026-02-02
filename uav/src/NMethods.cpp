@@ -218,7 +218,7 @@ Eigen::Vector3f Levant3::compute(const Eigen::Vector3f f, float dt) {
     nu2(1) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(1)-nu1(1)),1.0/2.0F)*sign_(z2_1(1)-nu1(1))) + z3_1(1);
     nu2(2) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(2)-nu1(2)),1.0/2.0F)*sign_(z2_1(2)-nu1(2))) + z3_1(2);
 
-    z3p(0) = -1.1F*L*sign_(z3_1(0)-nu2(0));
+    z3p(0) = -1.1F*L*sign_(z3_1(0)-nu2(0)); 
     z3p(1) = -1.1F*L*sign_(z3_1(1)-nu2(1));
     z3p(2) = -1.1F*L*sign_(z3_1(2)-nu2(2));
 
@@ -227,7 +227,7 @@ Eigen::Vector3f Levant3::compute(const Eigen::Vector3f f, float dt) {
     z2_1 = rk4_vec(z2_1,nu2,dt);
     z3_1 = rk4_vec(z3_1,z3p,dt);
 
-    return z0_1;
+    return nu0;
 }
 
 double Levant3::sign_(const double val){
