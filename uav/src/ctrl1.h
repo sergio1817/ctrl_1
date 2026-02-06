@@ -1,23 +1,23 @@
 //  created:    2011/05/01
 //  filename:   ctrl1.h
 //
-//  author:     Guillaume Sanahuja
+//  author:     Sergio Urzua
 //              Copyright Heudiasyc UMR UTC/CNRS 7253
 //
 //  version:    $Id: $
 //
-//  purpose:    demo cercle avec optitrack
+//  purpose:    demo sliding mode control laws
 //
 //
 /*********************************************************************/
 
-#ifndef PROYECTO22_H
-#define PROYECTO22_H
+#ifndef CTRL1_H
+#define CTRL1_H
 
 #include <UavStateMachine.h>
 #include "Sliding.h"
 #include "Sliding_pos.h"
-#include "Sliding_force.h"
+//#include "Sliding_force.h"
 
 
 namespace flair {
@@ -34,7 +34,7 @@ namespace flair {
         class ControlLaw;
         class Sliding;
         class Sliding_pos;
-        class Sliding_force;
+        //class Sliding_force;
     }
     namespace meta {
         class MetaVrpnObject;
@@ -79,7 +79,7 @@ class ctrl1 : public flair::meta::UavStateMachine {
 
         flair::filter::Sliding *u_sliding;
         flair::filter::Sliding_pos *u_sliding_pos;
-        flair::filter::Sliding_force *u_sliding_force;
+        //flair::filter::Sliding_force *u_sliding_force;
 
         flair::meta::MetaVrpnObject *uavVrpn;
         
@@ -91,7 +91,7 @@ class ctrl1 : public flair::meta::UavStateMachine {
 
         flair::gui::PushButton *start_prueba1,*stop_prueba1;
         flair::gui::ComboBox *control_select, *position_behavior, *xd_behavior, *yd_behavior, *zd_behavior;   
-        flair::gui::Tab *setupLawTab2, *graphLawTab2, *lawTab2, *setupLawTab3, *graphLawTab3, *positionTab, *positiongTab;
+        flair::gui::Tab *setupLawTab2, *graphLawTab2, *lawTab2, *setupLawTab3, *graphLawTab3,*graphLawTab4, *positionTab, *positiongTab;
         flair::gui::TabWidget *tabWidget2, *Pos_tabWidget;
         flair::gui::GroupBox *seg;
         flair::gui::Label *l, *l2, *lx, *ly, *lz;
@@ -104,4 +104,4 @@ class ctrl1 : public flair::meta::UavStateMachine {
         
 };
 
-#endif // PROYECTO22_H
+#endif // CTRL1_H

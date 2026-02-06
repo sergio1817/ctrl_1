@@ -3,14 +3,14 @@
 // CECILL-C License, Version 1.0.
 // %flair:license}
 //  created:    2011/05/01
-//  filename:   Pid_impl.cpp
+//  filename:   Sliding_impl.cpp
 //
-//  author:     Guillaume Sanahuja
+//  author:     Sergio Urzua
 //              Copyright Heudiasyc UMR UTC/CNRS 7253
 //
 //  version:    $Id: $
 //
-//  purpose:    Class defining a PID
+//  purpose:    Class defining a Sliding mode controller
 //
 //
 /*********************************************************************/
@@ -27,6 +27,7 @@
 #include <cmath>
 #include <Euler.h>
 #include <Label.h>
+#include "AC1.h"
 
 using std::string;
 using namespace flair::core;

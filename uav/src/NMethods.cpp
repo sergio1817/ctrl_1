@@ -2,6 +2,8 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <math.h>
+#include <functional>
+#include <iostream>
 
 
 float rk4(float(*fPtr)(float), const float iC, const float iCdt, const float dt){
@@ -20,6 +22,33 @@ Eigen::Vector3f rk4_vec(const Eigen::Vector3f iC, const Eigen::Vector3f iCdt, co
     integral(1) = rk4(function1d, iC(1), iCdt(1), dt);
     integral(2) = rk4(function1d, iC(2), iCdt(2), dt);
     return integral;
+}
+
+
+Eigen::Vector3f rk4_vec3f(const Eigen::Vector3f& x, 
+                          std::function<Eigen::Vector3f(const Eigen::Vector3f&)> derivative, 
+                          float dt) {
+    // Optimized RK4 for 3D vectors with non-linear dynamics
+    const Eigen::Vector3f k1 = derivative(x);
+    const Eigen::Vector3f k2 = derivative(x + 0.5f * dt * k1);
+    const Eigen::Vector3f k3 = derivative(x + 0.5f * dt * k2);
+    const Eigen::Vector3f k4 = derivative(x + dt * k3);
+    
+    // Use optimized computation: x + dt/6 * (k1 + 2*k2 + 2*k3 + k4)
+    return x + (dt / 6.0f) * (k1 + 2.0f * k2 + 2.0f * k3 + k4);
+}
+
+
+Eigen::VectorXf rk4_vecXf(const Eigen::VectorXf& x, 
+                          std::function<Eigen::VectorXf(const Eigen::VectorXf&)> derivative, 
+                          float dt) {
+    // Optimized RK4 for dynamic-sized vectors with non-linear dynamics
+    const Eigen::VectorXf k1 = derivative(x);
+    const Eigen::VectorXf k2 = derivative(x + 0.5f * dt * k1);
+    const Eigen::VectorXf k3 = derivative(x + 0.5f * dt * k2);
+    const Eigen::VectorXf k4 = derivative(x + dt * k3);
+    
+    return x + (dt / 6.0f) * (k1 + 2.0f * k2 + 2.0f * k3 + k4);
 }
 
 
@@ -162,6 +191,10 @@ float Levant_diff::sign_(const float a){
 
 
 Levant3::Levant3(uint8_t _mode, float _L, double _p): mode(_mode), L(_L), p(_p) {
+    nu0 = Eigen::Vector3f::Zero();
+    nu1 = Eigen::Vector3f::Zero();
+    nu2 = Eigen::Vector3f::Zero();
+    z3p = Eigen::Vector3f::Zero();
 }
 
 Levant3::~Levant3() {}
@@ -176,6 +209,11 @@ void Levant3::Reset() {
     z1 = 0.0F;
     z2 = 0.0F;
     z3 = 0.0F;
+
+    nu0 = Eigen::Vector3f::Zero();
+    nu1 = Eigen::Vector3f::Zero();
+    nu2 = Eigen::Vector3f::Zero();
+    z3p = Eigen::Vector3f::Zero();
 
     z0_1 = Eigen::Vector3f::Zero();
     z1_1 = Eigen::Vector3f::Zero();
@@ -201,12 +239,8 @@ double Levant3::compute(double f, float dt) {
 }
 
 Eigen::Vector3f Levant3::compute(const Eigen::Vector3f f, float dt) {
-    Eigen::Vector3f nu0;
-    Eigen::Vector3f nu1;
-    Eigen::Vector3f nu2;
-    Eigen::Vector3f z3p;
-
-    nu0(0) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(0)-f(0)),3.0/4.0F)*sign_(z0_1(0)-f(0))) + z0_1(0);
+    
+    nu0(0) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(0)-f(0)),3.0/4.0F)*sign_(z0_1(0)-f(0))) + z1_1(0);
     nu0(1) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(1)-f(1)),3.0/4.0F)*sign_(z0_1(1)-f(1))) + z1_1(1);
     nu0(2) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(2)-f(2)),3.0/4.0F)*sign_(z0_1(2)-f(2))) + z1_1(2);
 
@@ -226,6 +260,10 @@ Eigen::Vector3f Levant3::compute(const Eigen::Vector3f f, float dt) {
     z1_1 = rk4_vec(z1_1,nu1,dt);
     z2_1 = rk4_vec(z2_1,nu2,dt);
     z3_1 = rk4_vec(z3_1,z3p,dt);
+
+    
+
+    std::cout << "Levant3 - err: " << (z0_1-f).transpose() << '\n';
 
     return nu0;
 }

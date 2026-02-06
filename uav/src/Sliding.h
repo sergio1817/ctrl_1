@@ -4,10 +4,10 @@
 // %flair:license}
 /*!
  * \file Sliding.h
- * \brief Classe permettant le calcul d'un Pid
+ * \brief Class defining a Sliding mode controller
  * \author Sergio Urzua, Copyright Heudiasyc UMR UTC/CNRS 7253
  * \date 2011/05/01
- * \version 4.0
+ * \version 2.0
  */
 
 #ifndef SLIDING_H
@@ -16,7 +16,8 @@
 #include <Object.h>
 #include <ControlLaw.h>
 #include <Vector3D.h>
-#include <Eigen/Dense>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
 namespace flair {
     namespace core {

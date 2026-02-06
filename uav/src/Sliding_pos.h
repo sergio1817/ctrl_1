@@ -16,8 +16,10 @@
 #include <Object.h>
 #include "NMethods.h"
 #include <ControlLaw.h>
-#include <Eigen/Dense>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 #include <Vector3D.h>
+#include "AC1.h"
 
 namespace flair {
     namespace core {
@@ -29,6 +31,9 @@ namespace flair {
         class DoubleSpinBox;
         class CheckBox;
         class Label;
+    }
+    namespace filter {
+        class AC1;
     }
 }
 
@@ -51,8 +56,8 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     Sliding_pos(const flair::gui::LayoutPosition *position, std::string name);
     ~Sliding_pos();
-    void UpdateFrom(const flair::core::io_data *data);
-    void Reset(void);
+    void UpdateFrom(const flair::core::io_data *data) override;
+    void Reset() override;
     
     /*!
   * \brief Set input values
@@ -68,7 +73,7 @@ public:
     void SetValues(flair::core::Vector3Df xie, flair::core::Vector3Df xiep, flair::core::Vector3Df xid, 
                     flair::core::Vector3Df xidpp, flair::core::Vector3Df xidppp, flair::core::Vector3Df w, flair::core::Quaternion q);
     
-    void UseDefaultPlot(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot(const flair::gui::LayoutPosition *position) override;
     void UseDefaultPlot2(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot3(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot4(const flair::gui::LayoutPosition *position);
@@ -77,6 +82,10 @@ public:
     void UseDefaultPlot7(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot8(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot9(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot10(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot11(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot12(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot13(const flair::gui::LayoutPosition *position);
 
     
     
@@ -86,6 +95,7 @@ private:
     flair::core::Matrix *state;
     Levant_diff levant;
     Levant3 levant3;
+    AC1 *ac1, *ac2;
 
     float sech(float value);
 

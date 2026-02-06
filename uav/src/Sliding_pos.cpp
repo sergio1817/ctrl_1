@@ -16,9 +16,10 @@
 /*********************************************************************/
 #include "Sliding_pos.h"
 #include "NMethods.h"
+//#include "AC1.h"
 #include <Matrix.h>
+#include <Thread.h>
 #include <Vector3D.h>
-#include <Eigen/Dense>
 #include <TabWidget.h>
 #include <CheckBox.h>
 #include <Quaternion.h>
@@ -29,8 +30,8 @@
 #include <DataPlot1D.h>
 #include <cmath>
 #include <Euler.h>
-#include <iostream>
 #include <Label.h>
+#include <iostream>
 
 using std::string;
 using namespace flair::core;
@@ -68,6 +69,8 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     GroupBox *ori = new GroupBox(reglages_groupbox->NewRow(), "Orientacion");
     GroupBox *pos = new GroupBox(reglages_groupbox->NewRow(), "Posicion");
     GroupBox *mot = new GroupBox(reglages_groupbox->NewRow(), "Motores");
+    GroupBox *ac11 = new GroupBox(reglages_groupbox->NewRow(), "AC1");
+    GroupBox *ac12 = new GroupBox(reglages_groupbox->NewRow(), "AC2");
 
     T = new DoubleSpinBox(num->NewRow(), "period, 0 for auto", " s", 0, 1, 0.01,3);
     alpha_l = new DoubleSpinBox(num->NewRow(), "alpha Levant:", 0, 5000, 0.001, 3);
@@ -114,6 +117,10 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     
     t0 = double(GetTime())/1000000000;
 
+    ac1 = new AC1(ac11, "AC_ori");
+    ac2 = new AC1(ac12, "AC_pos");
+
+
     levant = Levant_diff("tanh", 8, 6, 3000);
     levant3 = Levant3(1, 8, 3000.0);
 
@@ -137,6 +144,10 @@ void Sliding_pos::Reset(void) {
 
     levant.Reset();
     levant3.Reset();
+    ac1->Reset();
+    ac2->Reset();
+
+    
 
     // sgnpos2 = Vector3ff(0,0,0);
     // sgn2 = Vector3ff(0,0,0);
@@ -292,6 +303,23 @@ void Sliding_pos::UseDefaultPlot9(const LayoutPosition *position) {
     
 }
 
+void Sliding_pos::UseDefaultPlot10(const LayoutPosition *position) {    
+    ac1->UseDefaultPlot(position);
+}
+
+void Sliding_pos::UseDefaultPlot11(const LayoutPosition *position) {    
+    ac1->UseDefaultPlot2(position);
+    
+}
+
+void Sliding_pos::UseDefaultPlot12(const LayoutPosition *position) {    
+    ac2->UseDefaultPlot(position);
+}
+
+void Sliding_pos::UseDefaultPlot13(const LayoutPosition *position) {    
+    ac2->UseDefaultPlot2(position);
+    
+}
 
 void Sliding_pos::UpdateFrom(const io_data *data) {
     float tactual=double(GetTime())/1000000000-t0;
@@ -318,13 +346,13 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Matrix3f Kdm = Kdv.asDiagonal();
 
     if (T->Value() == 0) {
-        delta_t = (float)(data->DataDeltaTime()) / 1000000000.;
+        delta_t = (float)(data->DataDeltaTime()) / 1000000000.0F;
     } else {
         delta_t = T->Value();
     }
     
     if (first_update) {
-        delta_t = 0;
+        delta_t = 0.0F;
         //first_update = false;
     }
 
@@ -351,7 +379,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     
     input->ReleaseMutex();
 
-    flair::core::Time t0_p = GetTime();
+    //flair::core::Time t0_p = GetTime();
 
     Eigen::Vector3f nup1 = xiep + alphap*xie;
 
@@ -359,7 +387,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         nup_t0 = nup1;
     }
 
-    Eigen::Vector3f nupd = nup_t0*exp(-k->Value()*(tactual));
+    Eigen::Vector3f nupd = 0*nup_t0*exp(-k->Value()*(tactual));
 
     Eigen::Vector3f nup = nup1 - nupd;
 
@@ -372,8 +400,16 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f xirpp = xidpp - alphap*xiep - gammap*sgnpos_p;
 
+    ac2->SetValues(xie, xiep, nurp);
+    ac2->Update(GetTime());
+    Eigen::Vector3f NNap = Eigen::Vector3f(ac2->Output(0), ac2->Output(1), ac2->Output(2));
 
-    Eigen::Vector3f u = -Kpm*nurp - m->Value()*g->Value()*ez + m->Value()*xirpp; //- m->Value()*g->Value()*ez + m->Value()*xirpp
+    std::cout<<"NNap: " << NNap.transpose() << '\n';
+
+
+    Eigen::Vector3f u = -Kpm*nurp + NNap; //- m->Value()*g->Value()*ez + m->Value()*xirpp
+
+    std::cout<<"u: " << u.transpose() << '\n';
 
     Trs = u.norm();
 
@@ -395,8 +431,8 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f up;
     // Eigen::Vector3f ud;
     if(levantd->IsChecked()){
-        //levant.setParam(alpha_l->Value(), lamb_l->Value());
-        //up = levant.Compute(u,delta_t);
+        // levant.setParam(alpha_l->Value(), lamb_l->Value());
+        // up = levant.Compute(u,delta_t);
         levant3.setParam(alpha_l->Value(), lamb_l->Value());
         up = levant3.compute(u,delta_t);
         //ud = levant.Compute(vec,delta_t);
@@ -428,22 +464,22 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     //std::cout<<"qe: " << qe.coeffs() << std::endl;
 
-    // Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
-    //                     -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
-    //                     (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
+    Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
+                        -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
+                        (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
 
-    Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
+    //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
 
     //std::cout<<"w: " << w << std::endl;
     //std::cout<<"wd: " << wd << std::endl;
 
     
 
-    flair::core::Time dt_pos = GetTime() - t0_p;
+    //flair::core::Time dt_pos = GetTime() - t0_p;
 
     //lp->SetText("Latecia pos: %.3f ms",(float)dt_pos/1000000);
 
-    flair::core::Time t0_o = GetTime();
+    //flair::core::Time t0_o = GetTime();
 
     Eigen::Vector3f we = w - wd;
 
@@ -473,9 +509,16 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f nur = nuq + gammao*sgnori;
 
-    Eigen::Vector3f tau = -Kdm*nur;
+    ac1->SetValues(QdTqe3.vec(), we, nur);
+    ac1->Update(GetTime());
+    Eigen::Vector3f NNa = Eigen::Vector3f(ac1->Output(0), ac1->Output(1), ac1->Output(2));
+    
+    std::cout<<"NNa: " << NNa.transpose() << '\n';
 
-    flair::core::Time dt_ori = GetTime() - t0_o;
+
+    Eigen::Vector3f tau = -Kdm*nur + NNa;
+
+    //flair::core::Time dt_ori = GetTime() - t0_o;
 
     //lo->SetText("Latecia ori: %.3f ms",(float)dt_ori/1000000);
 

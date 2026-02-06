@@ -6,7 +6,7 @@
 //
 //  version:    $Id: $
 //
-//  purpose:    Proyecto 2022
+//  purpose:    demo of control laws
 //
 //
 /*********************************************************************/
@@ -15,7 +15,7 @@
 #include "Sliding.h"
 #include "Sliding_pos.h"
 //#include "TargetJR3.h"
-#include "Sliding_force.h"
+//#include "Sliding_force.h"
 //#include "MetaJR3.h"
 #include <TargetController.h>
 #include <Uav.h>
@@ -94,6 +94,7 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     setupLawTab3 = new Tab(tabWidget2, "Setup Sliding Pos");
     graphLawTab2 = new Tab(tabWidget2, "Graficas Sliding");
     graphLawTab3 = new Tab(tabWidget2, "Graficas Sliding Pos");
+    graphLawTab4 = new Tab(tabWidget2, "Graficas AC");
 
     //Tab *posTab = new Tab(getFrameworkManager()->GetTabWidget(), "position");
     //TabWidget *Pos_tabWidget = new TabWidget(posTab->NewRow(), "position");
@@ -185,6 +186,12 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     u_sliding_pos->UseDefaultPlot5(positiongTab->At(0, 0));
     u_sliding_pos->UseDefaultPlot6(positiongTab->At(0, 1));
     u_sliding_pos->UseDefaultPlot7(positiongTab->At(0, 2));
+
+    u_sliding_pos->UseDefaultPlot10(graphLawTab4->At(0, 0));
+    u_sliding_pos->UseDefaultPlot11(graphLawTab4->At(0, 1));
+    u_sliding_pos->UseDefaultPlot12(graphLawTab4->At(1, 0));
+    u_sliding_pos->UseDefaultPlot13(graphLawTab4->At(1, 1));
+
     
     
     customOrientation=new AhrsData(this,"orientation");
@@ -286,7 +293,7 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     //getFrameworkManager()->AddDeviceToLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding_pos);
-    AddDeviceToControlLawLog(u_sliding_force);
+    //AddDeviceToControlLawLog(u_sliding_force);
 
 
 }

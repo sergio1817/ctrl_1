@@ -17,7 +17,7 @@
 #include <cstdio>
 #include <tclap/CmdLine.h>
 #include <TargetEthController.h>
-#include "TargetEthJR3.h"
+//#include "TargetEthJR3.h"
 
 using namespace TCLAP;
 using namespace std;
@@ -41,11 +41,11 @@ int main(int argc, char *argv[]){
 
 	FrameworkManager *manager;
 	manager = new FrameworkManager(name);
-	manager->SetupConnection(address, port, (Time)30000000000); // 30s timeout 
+	manager->SetupConnection(address, port ); // (Time)30000000000 30s timeout 
 	manager->SetupUserInterface(xml_file);
 	manager->SetupLogger(log_path);
 
-	Uav *drone = CreateUav(name, uav_type, "use_camv=false use_camh=false");
+	Uav *drone = CreateUav(name, uav_type, "use_camv=false use_camh=false"); // no camera
 	TargetEthController *controller = new TargetEthController("Dualshock3", ds3port);
 	//TargetEthJR3 *sensor = new TargetEthJR3("JR3", jr3port, 80);
 	ctrl1 *demo = new ctrl1(controller);
@@ -102,7 +102,7 @@ void parseOptions(int argc, char **argv){
 	}
 	catch (ArgException &e){ 
 		// catch any exceptions
-		cerr << "error: " << e.error() << " for arg " << e.argId() << endl;
+		cerr << "error: " << e.error() << " for arg " << e.argId() << '\n';
 		exit(EXIT_FAILURE);
 	}
 }
