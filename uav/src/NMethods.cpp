@@ -206,7 +206,7 @@ Eigen::Vector3f Levant3::compute(const Eigen::Vector3f f, float dt) {
     Eigen::Vector3f nu2;
     Eigen::Vector3f z3p;
 
-    nu0(0) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(0)-f(0)),3.0/4.0F)*sign_(z0_1(0)-f(0))) + z0_1(0);
+    nu0(0) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(0)-f(0)),3.0/4.0F)*sign_(z0_1(0)-f(0))) + z1_1(0);
     nu0(1) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(1)-f(1)),3.0/4.0F)*sign_(z0_1(1)-f(1))) + z1_1(1);
     nu0(2) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(2)-f(2)),3.0/4.0F)*sign_(z0_1(2)-f(2))) + z1_1(2);
 

@@ -15,7 +15,7 @@
 #include "Sliding.h"
 #include "Sliding_pos.h"
 //#include "TargetJR3.h"
-#include "Sliding_force.h"
+//#include "Sliding_force.h"
 //#include "MetaJR3.h"
 #include <TargetController.h>
 #include <Uav.h>
@@ -286,7 +286,7 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     //getFrameworkManager()->AddDeviceToLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding_pos);
-    AddDeviceToControlLawLog(u_sliding_force);
+    //AddDeviceToControlLawLog(u_sliding_force);
 
 
 }

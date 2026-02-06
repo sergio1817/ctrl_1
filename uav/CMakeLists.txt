@@ -39,14 +39,14 @@ SET(SRC_FILES
 	src/ctrl1.cpp
 	src/Sliding.cpp
 	src/Sliding_pos.cpp
-	src/Sliding_force.cpp
+	#src/Sliding_force.cpp
 	src/NMethods.cpp
 	#src/MetaJR3.cpp
-	src/TargetJR3.cpp
-	src/TargetEthJR3.cpp
+	#src/TargetJR3.cpp
+	#src/TargetEthJR3.cpp
 )
 
 FLAIR_DEMO(${PROJECT_NAME} "${SRC_FILES}"
-           DEST_DIR ctrl1
+           DEST_DIR ${PROJECT_NAME}
            COPY_RESOURCES
 )
