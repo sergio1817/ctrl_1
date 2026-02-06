@@ -1,4 +1,4 @@
-PROJECT(ctrl1)
+PROJECT(ctrl1_RL)
 cmake_minimum_required(VERSION 3.5)
 
 ### Eigen
@@ -48,6 +48,6 @@ SET(SRC_FILES
 )
 
 FLAIR_DEMO(${PROJECT_NAME} "${SRC_FILES}"
-           DEST_DIR ctrl1
+           DEST_DIR ${PROJECT_NAME}
            COPY_RESOURCES
 )

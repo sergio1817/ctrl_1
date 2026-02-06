@@ -52,11 +52,22 @@ AC1::AC1(const GroupBox *position, string name): ControlLaw(position, name, 3), 
     state = new Matrix(this, desc, floatType, name);
     delete desc;
     
-    V_a = Eigen::Matrix<float, 4, 10>::Random(4,10);
-    V_c = Eigen::Matrix<float, 4, 10>::Random(4,10);
+    //V_a = Eigen::Matrix<float, 4, 10>::Random(4,10);
+    //V_c = Eigen::Matrix<float, 4, 10>::Random(4,10)*10.0F;    
 
-    W_a = Eigen::Matrix<float, 10, 3>::Random(10,3)*0.001F;
-    W_c = Eigen::Matrix<float, 1, 10>::Random(1,10);
+    // W_a << 0.15F, 0.3F, 0.5F,
+    //         0.34F, 0.85F, 0.67F,
+    //         0.27F, 0.83F, 0.87F,
+    //         0.97F, 0.47F, 0.62F,
+    //         0.74F, 0.38F, 0.31F,
+    //         0.93F, 0.16F, 0.24F,
+    //         0.26F, 0.27F, 0.72F,
+    //         0.05F, 0.42F, 0.69F,
+    //         0.49F, 0.75F, 0.43F,
+    //         0.83F, 0.92F, 0.98F;
+
+    
+    //W_c = Eigen::Matrix<float, 1, 10>::Random(1,10);
 
     GroupBox *critic = new GroupBox(position->NewRow(), "Critic");
     GroupBox *actor = new GroupBox(position->LastRowLastCol(), "Actor");
@@ -64,7 +75,8 @@ AC1::AC1(const GroupBox *position, string name): ControlLaw(position, name, 3), 
     gamma = new DoubleSpinBox(actor->NewRow(), "Gamma", 0, 1000, 0.1, 1);
     kw = new DoubleSpinBox(critic->NewRow(), "Kw", 0, 1000, 0.1, 1);
     k = new DoubleSpinBox(critic->LastRowLastCol(), "K", 0, 1000, 0.1, 1);
-    
+
+    AddDataToLog(state);
     
 }
 
@@ -89,24 +101,44 @@ void AC1::UseDefaultPlot2(const LayoutPosition *position) {
 void AC1::Reset() {
     first_update = true;
 
-
+    reward = 0.0F;
     reward_int = 0.0F;
+    gamma_val = 0.0F;
+
     NNc_int = 0.0F;
 
     int_s = Eigen::Vector3f::Zero();
-    int_s2 = Eigen::Vector3f::Zero();
+    //int_s2 = Eigen::Vector3f::Zero();
 
-    V_a = Eigen::Matrix<float, 4, 10>::Random(4,10);
-    V_c = Eigen::Matrix<float, 4, 10>::Random(4,10);
+    V_a << 0.6557F, 0.8235F, 0.2760F, 0.9593F, 0.3517F, 0.1299F, 0.4505F, 0.8687F, 0.8530F, 0.4893F,
+            0.0357F, 0.6948F, 0.6797F, 0.5472F, 0.8308F, 0.5688F, 0.0838F, 0.0844F, 0.6221F, 0.3377F,
+            0.8491F, 0.3171F, 0.6551F, 0.1386F, 0.5853F, 0.4694F, 0.2290F, 0.3998F, 0.3510F, 0.9001F,
+            0.45F,   0.734F,  0.187F,  0.93F,   0.89F,   0.827F,  0.632F,  0.934F,  0.327F,  0.194F;
+    V_c << 0.8909F, 0.5472F, 0.1493F, 0.8407F, 0.8143F, 0.9293F, 0.1966F, 0.6160F, 0.3517F, 0.5853F,
+            -0.45F,  -0.65F,  -0.154F, -0.953F, -0.343F, -0.794F, -0.154F, -0.934F, -0.315F, -0.765F,
+            0.56F,   0.32F,   0.924F,  0.185F,  0.734F,  0.564F,  0.194F,  0.285F,  0.624F,  0.935F,
+            0.45F,   0.67F,   0.34F,   0.83F,   0.95F,   0.12F,   0.423F,  0.52F,   0.17F,   0.47F;
+    //V_c *= 10.0F;
 
-    W_a = Eigen::Matrix<float, 10, 3>::Random(10,3)*0.001F;
-    W_c = Eigen::Matrix<float, 1, 10>::Random(1,10);
+    W_a << 0.15F, 0.3F, 0.5F,
+            0.34F, 0.85F, 0.67F,
+            0.27F, 0.83F, 0.87F,
+            0.97F, 0.47F, 0.62F,
+            0.74F, 0.38F, 0.31F,
+            0.93F, 0.16F, 0.24F,
+            0.26F, 0.27F, 0.72F,
+            0.05F, 0.42F, 0.69F,
+            0.49F, 0.75F, 0.43F,
+            0.83F, 0.92F, 0.98F;
+    W_a *= 0.001F;
+
+    W_c << 0.1F, 0.23F, 0.54F, 0.98F, 0.464F, 0.176F, 0.584F, 0.045F, 1.0F, 0.2F;
 
     NNa = Eigen::Vector3f::Zero();
     NNc = 0.0F;
 
-    reward = 0.0F;
-    gamma_val = 0.0F;
+    
+    
 
 }
 
@@ -147,11 +179,18 @@ void AC1::UpdateFrom(const io_data *data) {
     input->ReleaseMutex();
 
     this->delta_t = (float)(data->DataDeltaTime()) / 1000000000.0F;
+
+    if (first_update) {
+        delta_t = 0.0F;
+        first_update = false;
+    }
+
+    
     computeReward1(e, ep);
     computeTD(NNc);
     updateCritic(e);
     updateActor(Sr);
-    antiWindup();
+    antiWindup(e);
 
     state->GetMutex();
     state->SetValue(0, 0, NNa(0));
@@ -178,16 +217,16 @@ void AC1::updateActor(Eigen::Vector3f Sr) {
 
     
     int_s = rk4_eigen(int_s, Sr, delta_t);
-    std::cout<<"int_s: " << int_s.transpose() << '\n';
-    int_s2 = rk4_vec(int_s2, Sr, delta_t);
-    std::cout<<"int_s2: " << int_s2.transpose() << '\n';
+    //std::cout<<"int_s: " << int_s.transpose() << '\n';
+    //int_s2 = rk4_vec(int_s2, Sr, delta_t);
+    //std::cout<<"int_s2: " << int_s2.transpose() << '\n';
 
 
     chi_a << 1, int_s;
 
     Eigen::VectorXf sigmoid_Va = sigmoid1(V_a.transpose() * chi_a);
 
-    std::cout<<"sigmoid_Va: " << sigmoid_Va.transpose() << '\n';
+    //std::cout<<"sigmoid_Va: " << sigmoid_Va.transpose() << '\n';
 
     Eigen::Matrix<float, 10, 10> Gamma = gamma->Value() * Eigen::Matrix<float,10,10>::Identity();
 
@@ -241,11 +280,22 @@ void AC1::updateCritic(Eigen::Vector3f e) {
 }
 
 
-void AC1::antiWindup() {
+void AC1::antiWindup(const Eigen::Vector3f& e) {
     // Implementation of the anti-windup logic goes here
     float min_val = -8.0F;
     float max_val = 8.0F;
-    if (saturate(NNa, min_val, max_val)) {
+
+    if (NNa.hasNaN() || std::isnan(NNc)) {
+        Reset();
+        return;
+    }
+
+    if (e.norm()>2.0F) {
+        Reset();
+        return;
+    }
+
+    if (saturate(NNa, min_val, max_val) ) {
         Reset();
     };
 

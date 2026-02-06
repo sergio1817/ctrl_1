@@ -1,4 +1,4 @@
-PROJECT(ctrl1_simulator)
+PROJECT(ctrl1_RL_simulator)
 cmake_minimum_required(VERSION 3.5)
 
 SET(FLAIR_USE_SIMULATOR TRUE)
@@ -11,7 +11,9 @@ SET(SRC_FILES
 	./src/main.cpp
 )
 
+string(REPLACE "_simulator" "" PROJECT_NAME_NO_SIM "${PROJECT_NAME}")
+
 FLAIR_DEMO_HOST_CXX(${PROJECT_NAME} "${SRC_FILES}"
-           DEST_DIR ctrl1
+           DEST_DIR ${PROJECT_NAME_NO_SIM}
            COPY_RESOURCES
 )

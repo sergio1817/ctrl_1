@@ -263,7 +263,7 @@ Eigen::Vector3f Levant3::compute(const Eigen::Vector3f f, float dt) {
 
     
 
-    std::cout << "Levant3 - err: " << (z0_1-f).transpose() << '\n';
+    //std::cout << "Levant3 - err: " << (z0_1-f).transpose() << '\n';
 
     return nu0;
 }

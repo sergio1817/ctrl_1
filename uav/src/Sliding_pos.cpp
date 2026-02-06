@@ -131,6 +131,8 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     sgnori << 0,0,0;
     
     AddDataToLog(state);
+    AddDeviceToLog(ac1);
+    AddDeviceToLog(ac2);
 }
 
 Sliding_pos::~Sliding_pos(void) {}
@@ -139,8 +141,10 @@ void Sliding_pos::Reset(void) {
     first_update = true;
     t0 = 0;
     t0 = double(GetTime())/1000000000;
-    sgnori_p << 0,0,0;
-    sgnori << 0,0,0;
+    sgnori_p = Eigen::Vector3f::Zero();
+    sgnori = Eigen::Vector3f::Zero();
+    sgnpos_p = Eigen::Vector3f::Zero();
+    sgnpos = Eigen::Vector3f::Zero();
 
     levant.Reset();
     levant3.Reset();
@@ -155,8 +159,6 @@ void Sliding_pos::Reset(void) {
     // sgnpos << 0,0,0;
     // sgn << 0,0,0;
 
-    sgnpos_p << 0,0,0;
-    sgnpos << 0,0,0;
 
 
 //    pimpl_->i = 0;
@@ -387,7 +389,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         nup_t0 = nup1;
     }
 
-    Eigen::Vector3f nupd = 0*nup_t0*exp(-k->Value()*(tactual));
+    Eigen::Vector3f nupd = nup_t0*exp(-k->Value()*(tactual));
 
     Eigen::Vector3f nup = nup1 - nupd;
 
@@ -444,7 +446,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     
 
     Eigen::Vector3f uh = u.normalized();
-    Eigen::Vector3f uph = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
+    Eigen::Vector3f uph = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3.0F));
 
     //std::cout << "uph: " << uph << std::endl;
 
@@ -452,8 +454,8 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Quaternionf qd( (0.5F)*sqrtf((-2*uh(2))+2), uh(1)/sqrtf((-2*uh(2))+2), -uh(0)/sqrtf((-2*uh(2))+2), 0);
 
     Eigen::Quaternionf qdp(-(0.5F)*(uph(2)/sqrtf((-2*uh(2))+2)),
-                            (uph(1)/sqrtf((-2*uh(2))+2)) + ((uh(1)*uph(2))/powf((-2*uh(2))+2,1.5)),
-                            -(uph(0)/sqrtf((-2*uh(2))+2)) - ((uh(0)*uph(2))/powf((-2*uh(2))+2,1.5)),
+                            (uph(1)/sqrtf((-2*uh(2))+2)) + ((uh(1)*uph(2))/powf((-2*uh(2))+2,1.5F)),
+                            -(uph(0)/sqrtf((-2*uh(2))+2)) - ((uh(0)*uph(2))/powf((-2*uh(2))+2,1.5F)),
                             0);
 
     Quaternion qd2 = Quaternion(qd.w(),qd.x(),qd.y(),qd.z());
@@ -464,11 +466,11 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     //std::cout<<"qe: " << qe.coeffs() << std::endl;
 
-    Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
-                        -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
-                        (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
+    // Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
+    //                     -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
+    //                     (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
 
-    //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
+    Eigen::Vector3f wd = 2.0F*(qd.conjugate()*qdp).vec();
 
     //std::cout<<"w: " << w << std::endl;
     //std::cout<<"wd: " << wd << std::endl;
