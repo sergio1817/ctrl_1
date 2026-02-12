@@ -103,6 +103,18 @@ void Sliding::Reset(void) {
     t0 = double(GetTime())/1000000000;
     sgnori_p << 0,0,0;
     sgnori << 0,0,0;
+
+    state->GetMutex();
+    for (int i = 0; i < 7; ++i) {
+        state->SetValueNoMutex(i, 0, 0.0F);
+    }
+    state->ReleaseMutex();
+
+    output->SetValue(0, 0, 0.0F);
+    output->SetValue(1, 0, 0.0F);
+    output->SetValue(2, 0, 0.0F);
+    output->SetValue(3, 0, 0.0F);
+
 //    pimpl_->i = 0;
 //    pimpl_->first_update = true;
 }
@@ -154,7 +166,7 @@ void Sliding::UseDefaultPlot4(const LayoutPosition *position) {
 }
 
 void Sliding::UseDefaultPlot5(const LayoutPosition *position) {    
-    DataPlot1D *Sq = new DataPlot1D(position, "nu_q", -5, 5);
+    DataPlot1D *Sq = new DataPlot1D(position, "S_qa", -2, 2);
     Sq->AddCurve(state->Element(4), DataPlot::Green);
     Sq->AddCurve(state->Element(5), DataPlot::Red);
     Sq->AddCurve(state->Element(6), DataPlot::Black);
@@ -163,7 +175,9 @@ void Sliding::UseDefaultPlot5(const LayoutPosition *position) {
 
 
 void Sliding::UpdateFrom(const io_data *data) {
-    float tactual=(double(GetTime())/1000000000)-t0;
+    constexpr float kEps = 1e-6f;
+    const Time now = GetTime();
+    float tactual=(double(now)/1000000000)-t0;
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
 
     //printf("control\n");
@@ -177,6 +191,9 @@ void Sliding::UpdateFrom(const io_data *data) {
     if (first_update) {
         delta_t = 0;
         //first_update = false;
+    }
+    if (delta_t < 0.0F) {
+        delta_t = 0.0F;
     }
     
     const Matrix* input = dynamic_cast<const Matrix*>(data);
@@ -207,25 +224,53 @@ void Sliding::UpdateFrom(const io_data *data) {
     
     Euler currentAngles = q2.ToEuler();
 
+    const float alpha_roll_v = alpha_roll->Value();
+    const float alpha_pitch_v = alpha_pitch->Value();
+    const float alpha_yaw_v = alpha_yaw->Value();
+    const float gamma_roll_v = gamma_roll->Value();
+    const float gamma_pitch_v = gamma_pitch->Value();
+    const float gamma_yaw_v = gamma_yaw->Value();
+    const float Kd_roll_v = Kd_roll->Value();
+    const float Kd_pitch_v = Kd_pitch->Value();
+    const float Kd_yaw_v = Kd_yaw->Value();
+    const float k_val = k->Value();
+    const float p_val = p->Value();
+    const float k1_val = k1->Value();
+    const float k2_val = k2->Value();
+    const float g_val = g->Value();
+    const float m_val = m->Value();
+    const float km_val = (std::abs(km->Value()) < kEps) ? (km->Value() >= 0.0F ? kEps : -kEps) : km->Value();
+    const float sat_r_val = sat_r->Value();
+    const float sat_p_val = sat_p->Value();
+    const float sat_y_val = sat_y->Value();
+    const float sat_t_val = sat_t->Value();
+
 
     //Eigen::Vector3f alphao_v(alpha_roll->Value(), alpha_pitch->Value(), alpha_yaw->Value());
-    Eigen::Matrix3f alphao = Eigen::Vector3f(alpha_roll->Value(), alpha_pitch->Value(), alpha_yaw->Value()).asDiagonal();
+    const Eigen::Vector3f alphao_v(alpha_roll_v, alpha_pitch_v, alpha_yaw_v);
 
     //Eigen::Vector3f gammao_v(gamma_roll->Value(), gamma_pitch->Value(), gamma_yaw->Value());
-    Eigen::Matrix3f gammao = Eigen::Vector3f(gamma_roll->Value(), gamma_pitch->Value(), gamma_yaw->Value()).asDiagonal();
+    const Eigen::Vector3f gammao_v(gamma_roll_v, gamma_pitch_v, gamma_yaw_v);
 
     //Eigen::Vector3f Kdv(Kd_roll->Value(), Kd_pitch->Value(), Kd_yaw->Value());
-    Eigen::Matrix3f Kdm = Eigen::Vector3f(Kd_roll->Value(), Kd_pitch->Value(), Kd_yaw->Value()).asDiagonal();
+    const Eigen::Vector3f Kdv(Kd_roll_v, Kd_pitch_v, Kd_yaw_v);
 
-    Eigen::Quaternionf qe = q*qd.conjugate();
+    if (q.norm() > kEps) {
+        q.normalize();
+    }
+    if (qd.norm() > kEps) {
+        qd.normalize();
+    }
+    const Eigen::Quaternionf qd_conj = qd.conjugate();
+    Eigen::Quaternionf qe = q * qd_conj;
 
-    flair::core::Time t0_o = GetTime();
+    //flair::core::Time t0_o = GetTime();
 
     Eigen::Vector3f we = w -wd;
 
-    Eigen::Vector3f QdTqe3 = qd.toRotationMatrix().transpose()*qe.vec();
+    Eigen::Vector3f QdTqe3 = qd_conj._transformVector(qe.vec());
 
-    Eigen::Vector3f nu = we + alphao*QdTqe3;
+    Eigen::Vector3f nu = we + alphao_v.cwiseProduct(QdTqe3);
     
     //Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
 
@@ -234,37 +279,40 @@ void Sliding::UpdateFrom(const io_data *data) {
         first_update = false;
     }
     
-    Eigen::Vector3f nud = nu_t0*exp(-k->Value()*(tactual));
+    Eigen::Vector3f nud = nu_t0*exp(-k_val*(tactual));
     
     Eigen::Vector3f nuq = nu-nud;
 
-    sgnori_p = signth(nuq,p->Value());
-    sgnori = rk4_vec(sgnori, sgnori_p, delta_t);
+    sgnori_p = signth(nuq,p_val);
+    sgnori = rk4_vec(sgnori, delta_t, [this](const Eigen::Vector3f&) { return this->sgnori_p; });
 
-    Eigen::Vector3f nur = nuq + gammao*sgnori;
+    Eigen::Vector3f nur = nuq + gammao_v.cwiseProduct(sgnori);
 
-    Eigen::Vector3f tau = -Kdm*nur;
+    Eigen::Vector3f tau = -Kdv.cwiseProduct(nur);
 
-    flair::core::Time dt_ori = GetTime() - t0_o;
+    //flair::core::Time dt_ori = GetTime() - t0_o;
 
     //lo->SetText("Latecia ori: %.3f ms",(float)dt_ori/1000000);
     
-    Trs =  (m->Value()*(k1->Value()*zp + k2->Value()*ze + g->Value()))/(cosf(currentAngles.pitch)*cosf(currentAngles.roll));
+    const float cos_pitch = cosf(currentAngles.pitch);
+    const float cos_roll = cosf(currentAngles.roll);
+    const float thrust_den = (std::abs(cos_pitch * cos_roll) < kEps) ? (cos_pitch * cos_roll >= 0.0F ? kEps : -kEps) : (cos_pitch * cos_roll);
+    Trs =  (m_val*(k1_val*zp + k2_val*ze + g_val))/thrust_den;
     
-    tau_roll = (float)tau(0)/km->Value();
+    tau_roll = (float)tau(0)/km_val;
     
-    tau_pitch = (float)tau(1)/km->Value();
+    tau_pitch = (float)tau(1)/km_val;
     
-    tau_yaw = (float)tau(2)/km->Value();
+    tau_yaw = (float)tau(2)/km_val;
     
-    Tr = (float)Trs/km->Value();
+    Tr = (float)Trs/km_val;
     
     //printf("torques\n");
     
-    tau_roll = -Sat(tau_roll,sat_r->Value());
-    tau_pitch = -Sat(tau_pitch,sat_p->Value());
-    tau_yaw = -Sat(tau_yaw,sat_y->Value());
-    Tr = Sat(Tr,sat_t->Value());
+    tau_roll = -Sat(tau_roll,sat_r_val);
+    tau_pitch = -Sat(tau_pitch,sat_p_val);
+    tau_yaw = -Sat(tau_yaw,sat_y_val);
+    Tr = Sat(Tr,sat_t_val);
     
     state->GetMutex();
     state->SetValueNoMutex(0, 0, tau_roll);

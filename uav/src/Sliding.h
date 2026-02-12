@@ -16,7 +16,8 @@
 #include <Object.h>
 #include <ControlLaw.h>
 #include <Vector3D.h>
-#include <Eigen/Dense>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
 namespace flair {
     namespace core {
@@ -97,4 +98,4 @@ private:
 } // end namespace filter
 } // end namespace flair
 
-#endif // LINEAR_H
+#endif // SLIDING_H

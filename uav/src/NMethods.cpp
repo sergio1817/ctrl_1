@@ -1,7 +1,7 @@
 #include "NMethods.h"
-#include <Eigen/Dense>
+#include <Eigen/Core>
 #include <cmath>
-#include <math.h>
+//#include <math.h>
 
 
 float rk4(float(*fPtr)(float), const float iC, const float iCdt, const float dt){
@@ -14,13 +14,19 @@ float rk4(float(*fPtr)(float), const float iC, const float iCdt, const float dt)
 }
 
 
-Eigen::Vector3f rk4_vec(const Eigen::Vector3f iC, const Eigen::Vector3f iCdt, const float dt){
-    Eigen::Vector3f integral(0,0,0);
-    integral(0) = rk4(function1d, iC(0), iCdt(0), dt);
-    integral(1) = rk4(function1d, iC(1), iCdt(1), dt);
-    integral(2) = rk4(function1d, iC(2), iCdt(2), dt);
-    return integral;
-}
+
+
+
+
+
+
+// Eigen::Vector3f rk4_vec(const Eigen::Vector3f iC, const Eigen::Vector3f iCdt, const float dt){
+//     Eigen::Vector3f integral(0,0,0);
+//     integral(0) = rk4(function1d, iC(0), iCdt(0), dt);
+//     integral(1) = rk4(function1d, iC(1), iCdt(1), dt);
+//     integral(2) = rk4(function1d, iC(2), iCdt(2), dt);
+//     return integral;
+// }
 
 
 /*! \fn function1d.
@@ -132,8 +138,8 @@ Eigen::Vector3f Levant_diff::Compute(const Eigen::Vector3f f, const float dt){
     u1p_vec(1) = -alpha_vec(1)*sign_(x_vec(1)-f(1));
     u1p_vec(2) = -alpha_vec(2)*sign_(x_vec(2)-f(2));
 
-    x_vec = rk4_vec(x_vec, u_vec, dt);
-    u1_vec = rk4_vec(u1_vec, u1p_vec, dt);
+    x_vec = rk4_vec(x_vec,dt, [this](const Eigen::Vector3f&) { return this->u_vec; });
+    u1_vec = rk4_vec(u1_vec, dt, [this](const Eigen::Vector3f&) { return this->u1p_vec; });
 
     err_v = x_vec-f;
     return u_vec;
@@ -162,6 +168,11 @@ float Levant_diff::sign_(const float a){
 
 
 Levant3::Levant3(uint8_t _mode, float _L, double _p): mode(_mode), L(_L), p(_p) {
+    nu0 = Eigen::Vector3f::Zero();
+    nu1 = Eigen::Vector3f::Zero();
+    nu2 = Eigen::Vector3f::Zero();
+    z3p = Eigen::Vector3f::Zero();
+    updateLPowers();
 }
 
 Levant3::~Levant3() {}
@@ -169,6 +180,19 @@ Levant3::~Levant3() {}
 void Levant3::setParam(double L, double p) {
     this->L = L;
     this->p = p;
+    updateLPowers();
+}
+
+void Levant3::updateLPowers() {
+    if (!std::isfinite(L) || L <= 0.0) {
+        L_p14 = 0.0;
+        L_p13 = 0.0;
+        L_p12 = 0.0;
+        return;
+    }
+    L_p14 = std::sqrt(std::sqrt(L));
+    L_p13 = std::cbrt(L);
+    L_p12 = std::sqrt(L);
 }
 
 void Levant3::Reset() {
@@ -177,55 +201,76 @@ void Levant3::Reset() {
     z2 = 0.0F;
     z3 = 0.0F;
 
+    nu0 = Eigen::Vector3f::Zero();
+    nu1 = Eigen::Vector3f::Zero();
+    nu2 = Eigen::Vector3f::Zero();
+    z3p = Eigen::Vector3f::Zero();
+
     z0_1 = Eigen::Vector3f::Zero();
     z1_1 = Eigen::Vector3f::Zero();
     z2_1 = Eigen::Vector3f::Zero();
     z3_1 = Eigen::Vector3f::Zero();
 }
 
-double Levant3::compute(double f, float dt) {
-    double nu0 = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0-f),3.0/4.0F)*sign_(z0-f)) + z1;
-    double nu1 = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1-nu0),2.0/3.0F)*sign_(z1-nu0)) + z2;
-    double nu2 = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2-nu1),1.0/2.0F)*sign_(z2-nu1)) + z3;
-    double z3p = -1.1F*L*sign_(z3-nu2);
+double Levant3::compute(double& f, float dt) {
+    const double e0 = z0 - f;
+    const double abs_e0 = std::fabs(e0);
+    const double e0_3_4 = std::sqrt(std::sqrt(abs_e0 * abs_e0 * abs_e0));
 
-    z0 = rk4(function1d,z0,nu0,dt);
-    z1 = rk4(function1d,z1,nu1,dt);
-    z2 = rk4(function1d,z2,nu2,dt);
-    z3 = rk4(function1d,z3,z3p,dt);
+    const double nu0_local = (-50.0 * L_p14 * e0_3_4 * sign_(e0)) + z1;
+    const double e1_local = z1 - nu0_local;
+    const double abs_e1 = std::fabs(e1_local);
+    const double e1_2_3 = std::cbrt(abs_e1 * abs_e1);
+
+    const double nu1_local = (-20.0 * L_p13 * e1_2_3 * sign_(e1_local)) + z2;
+    const double e2_local = z2 - nu1_local;
+    const double abs_e2 = std::fabs(e2_local);
+    const double e2_1_2 = std::sqrt(abs_e2);
+
+    const double nu2_local = (-8.0 * L_p12 * e2_1_2 * sign_(e2_local)) + z3;
+    const double z3p_local = -1.1 * L * sign_(z3 - nu2_local);
+
+    z0 = rk4(z0, static_cast<double>(dt), [nu0_local](double) { return nu0_local; });
+    z1 = rk4(z1, static_cast<double>(dt), [nu1_local](double) { return nu1_local; });
+    z2 = rk4(z2, static_cast<double>(dt), [nu2_local](double) { return nu2_local; });
+    z3 = rk4(z3, static_cast<double>(dt), [z3p_local](double) { return z3p_local; });
 
     //fp = nu0;
     //fp = nu0; // Compute the first derivative (velocity)
 
-    return nu0;
+    return nu0_local;
 }
 
-Eigen::Vector3f Levant3::compute(const Eigen::Vector3f f, float dt) {
-    Eigen::Vector3f nu0;
-    Eigen::Vector3f nu1;
-    Eigen::Vector3f nu2;
-    Eigen::Vector3f z3p;
+Eigen::Vector3f Levant3::compute(const Eigen::Vector3f& f, float dt) {
+    for (int i = 0; i < 3; ++i) {
+        const float e0 = z0_1(i) - f(i);
+        const float abs_e0 = std::fabs(e0);
+        const float e0_3_4 = std::sqrt(std::sqrt(abs_e0 * abs_e0 * abs_e0));
 
-    nu0(0) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(0)-f(0)),3.0/4.0F)*sign_(z0_1(0)-f(0))) + z1_1(0);
-    nu0(1) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(1)-f(1)),3.0/4.0F)*sign_(z0_1(1)-f(1))) + z1_1(1);
-    nu0(2) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(2)-f(2)),3.0/4.0F)*sign_(z0_1(2)-f(2))) + z1_1(2);
+        nu0(i) = (-50.0F * static_cast<float>(L_p14) * e0_3_4 * static_cast<float>(sign_(e0))) + z1_1(i);
 
-    nu1(0) = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1_1(0)-nu0(0)),2.0/3.0F)*sign_(z1_1(0)-nu0(0))) + z2_1(0);
-    nu1(1) = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1_1(1)-nu0(1)),2.0/3.0F)*sign_(z1_1(1)-nu0(1))) + z2_1(1);
-    nu1(2) = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1_1(2)-nu0(2)),2.0/3.0F)*sign_(z1_1(2)-nu0(2))) + z2_1(2);
+        const float e1 = z1_1(i) - nu0(i);
+        const float abs_e1 = std::fabs(e1);
+        const float e1_2_3 = std::cbrt(abs_e1 * abs_e1);
 
-    nu2(0) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(0)-nu1(0)),1.0/2.0F)*sign_(z2_1(0)-nu1(0))) + z3_1(0);
-    nu2(1) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(1)-nu1(1)),1.0/2.0F)*sign_(z2_1(1)-nu1(1))) + z3_1(1);
-    nu2(2) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(2)-nu1(2)),1.0/2.0F)*sign_(z2_1(2)-nu1(2))) + z3_1(2);
+        nu1(i) = (-20.0F * static_cast<float>(L_p13) * e1_2_3 * static_cast<float>(sign_(e1))) + z2_1(i);
 
-    z3p(0) = -1.1F*L*sign_(z3_1(0)-nu2(0)); 
-    z3p(1) = -1.1F*L*sign_(z3_1(1)-nu2(1));
-    z3p(2) = -1.1F*L*sign_(z3_1(2)-nu2(2));
+        const float e2 = z2_1(i) - nu1(i);
+        const float abs_e2 = std::fabs(e2);
+        const float e2_1_2 = std::sqrt(abs_e2);
 
-    z0_1 = rk4_vec(z0_1,nu0,dt);
-    z1_1 = rk4_vec(z1_1,nu1,dt);
-    z2_1 = rk4_vec(z2_1,nu2,dt);
-    z3_1 = rk4_vec(z3_1,z3p,dt);
+        nu2(i) = (-8.0F * static_cast<float>(L_p12) * e2_1_2 * static_cast<float>(sign_(e2))) + z3_1(i);
+        z3p(i) = -1.1F * static_cast<float>(L) * static_cast<float>(sign_(z3_1(i) - nu2(i)));
+    }
+
+    z0_1 = rk4_vec(z0_1, dt, [this](const Eigen::Vector3f&) { return this->nu0; });
+    z1_1 = rk4_vec(z1_1, dt, [this](const Eigen::Vector3f&) { return this->nu1; });
+    z2_1 = rk4_vec(z2_1, dt, [this](const Eigen::Vector3f&) { return this->nu2; });
+    z3_1 = rk4_vec(z3_1, dt, [this](const Eigen::Vector3f&) { return this->z3p; });
+
+    
+
+    //std::cout << "Levant3 - err: " << (z0_1-f).transpose() << '\n';
 
     return nu0;
 }
