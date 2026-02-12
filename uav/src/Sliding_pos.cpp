@@ -18,11 +18,13 @@
 #include "NMethods.h"
 //#include "AC1.h"
 #include <Matrix.h>
+#include <Object.h>
 #include <Thread.h>
 #include <Vector3D.h>
 #include <TabWidget.h>
 #include <CheckBox.h>
 #include <Quaternion.h>
+#include <Eigen/Geometry>
 #include <Layout.h>
 #include <LayoutPosition.h>
 #include <GroupBox.h>
@@ -31,7 +33,7 @@
 #include <cmath>
 #include <Euler.h>
 #include <Label.h>
-#include <iostream>
+//#include <iostream>
 
 using std::string;
 using namespace flair::core;
@@ -46,7 +48,7 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     // init matrix
     input = new Matrix(this, 4, 8, floatType, name);
 
-    MatrixDescriptor *desc = new MatrixDescriptor(13, 1);
+    MatrixDescriptor *desc = new MatrixDescriptor(26, 1);
     desc->SetElementName(0, 0, "u_roll");
     desc->SetElementName(1, 0, "u_pitch");
     desc->SetElementName(2, 0, "u_yaw");
@@ -60,6 +62,20 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     desc->SetElementName(10, 0, "Sa_roll");
     desc->SetElementName(11, 0, "Sa_pitch");
     desc->SetElementName(12, 0, "Sa_yaw");
+    desc->SetElementName(13, 0, "qe_0");
+    desc->SetElementName(14, 0, "qe_1");
+    desc->SetElementName(15, 0, "qe_2");
+    desc->SetElementName(16, 0, "qe_3");
+    desc->SetElementName(17, 0, "xie_x");
+    desc->SetElementName(18, 0, "xie_y");
+    desc->SetElementName(19, 0, "xie_z");
+    desc->SetElementName(20, 0, "u_x");
+    desc->SetElementName(21, 0, "u_y");
+    desc->SetElementName(22, 0, "u_z");
+    desc->SetElementName(23, 0, "tau_roll");
+    desc->SetElementName(24, 0, "tau_pitch");
+    desc->SetElementName(25, 0, "tau_yaw");
+
     state = new Matrix(this, desc, floatType, name);
     delete desc;
 
@@ -117,8 +133,8 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     
     t0 = double(GetTime())/1000000000;
 
-    ac1 = new AC1(ac11, "AC_ori");
-    ac2 = new AC1(ac12, "AC_pos");
+    ac1 = new AC1(ac11, "AC_ori_full");
+    ac2 = new AC1(ac12, "AC_pos_full");
 
 
     levant = Levant_diff("tanh", 8, 6, 3000);
@@ -135,7 +151,14 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     AddDeviceToLog(ac2);
 }
 
-Sliding_pos::~Sliding_pos(void) {}
+Sliding_pos::~Sliding_pos(void) {
+     
+    delete input;
+    delete state;
+    delete ac1;
+    delete ac2;
+    
+}
 
 void Sliding_pos::Reset(void) {
     first_update = true;
@@ -150,6 +173,17 @@ void Sliding_pos::Reset(void) {
     levant3.Reset();
     ac1->Reset();
     ac2->Reset();
+
+    state->GetMutex();
+    for (int i = 0; i < 26; ++i) {
+        state->SetValueNoMutex(i, 0, 0.0F);
+    }
+    state->ReleaseMutex();
+
+    output->SetValue(0, 0, 0.0F);
+    output->SetValue(1, 0, 0.0F);
+    output->SetValue(2, 0, 0.0F);
+    output->SetValue(3, 0, 0.0F);
 
     
 
@@ -290,7 +324,7 @@ void Sliding_pos::UseDefaultPlot7(const LayoutPosition *position) {
 }
 
 void Sliding_pos::UseDefaultPlot8(const LayoutPosition *position) {    
-    DataPlot1D *Sp = new DataPlot1D(position, "nu_rp", -5, 5);
+    DataPlot1D *Sp = new DataPlot1D(position, "S_qp", -3, 3);
     Sp->AddCurve(state->Element(7), DataPlot::Red);
     Sp->AddCurve(state->Element(8), DataPlot::Green);
     Sp->AddCurve(state->Element(9), DataPlot::Blue);
@@ -298,7 +332,7 @@ void Sliding_pos::UseDefaultPlot8(const LayoutPosition *position) {
 }
 
 void Sliding_pos::UseDefaultPlot9(const LayoutPosition *position) {    
-    DataPlot1D *Sq = new DataPlot1D(position, "nu_r", -5, 5);
+    DataPlot1D *Sq = new DataPlot1D(position, "S_qa", -2, 2);
     Sq->AddCurve(state->Element(10), DataPlot::Green);
     Sq->AddCurve(state->Element(11), DataPlot::Red);
     Sq->AddCurve(state->Element(12), DataPlot::Black);
@@ -323,29 +357,75 @@ void Sliding_pos::UseDefaultPlot13(const LayoutPosition *position) {
     
 }
 
+void Sliding_pos::UseDefaultPlot14(const LayoutPosition *position) {
+    DataPlot1D *qe_plot = new DataPlot1D(position, "qe", -1, 1);
+    qe_plot->AddCurve(state->Element(13), DataPlot::Red);
+    qe_plot->AddCurve(state->Element(14), DataPlot::Green);
+    qe_plot->AddCurve(state->Element(15), DataPlot::Blue);
+    qe_plot->AddCurve(state->Element(16), DataPlot::Black);
+}
+
+void Sliding_pos::UseDefaultPlot15(const LayoutPosition *position) {
+    DataPlot1D *xie_plot = new DataPlot1D(position, "xie", -1, 1);
+    xie_plot->AddCurve(state->Element(17), DataPlot::Red);
+    xie_plot->AddCurve(state->Element(18), DataPlot::Green);
+    xie_plot->AddCurve(state->Element(19), DataPlot::Blue);
+}
+
+void Sliding_pos::UseDefaultPlot16(const LayoutPosition *position) {
+    DataPlot1D *uc_plot = new DataPlot1D(position, "u", -5, 2);
+    uc_plot->AddCurve(state->Element(20), DataPlot::Red);
+    uc_plot->AddCurve(state->Element(21), DataPlot::Green);
+    uc_plot->AddCurve(state->Element(22), DataPlot::Blue);
+}
+
+void Sliding_pos::UseDefaultPlot17(const LayoutPosition *position) {    
+    DataPlot1D *tau_plot = new DataPlot1D(position, "tau", -1, 1);
+    tau_plot->AddCurve(state->Element(23), DataPlot::Red);
+    tau_plot->AddCurve(state->Element(24), DataPlot::Green);
+    tau_plot->AddCurve(state->Element(25), DataPlot::Blue);
+}
+
 void Sliding_pos::UpdateFrom(const io_data *data) {
-    float tactual=double(GetTime())/1000000000-t0;
+    constexpr float kEps = 1e-6f;
+    const Time now = GetTime();
+    float tactual=(double(GetTime())/1000000000)-t0;
     //Printf("tactual: %f\n",tactual);
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
-    Eigen::Vector3f ez(0,0,1);
-    
-    Eigen::Vector3f alphap_v(alpha_x->Value(), alpha_y->Value(), alpha_z->Value());
-    Eigen::Matrix3f alphap = alphap_v.asDiagonal();
+    const Eigen::Vector3f ez = Eigen::Vector3f::UnitZ();
 
-    Eigen::Vector3f gammap_v(gamma_x->Value(), gamma_y->Value(), gamma_z->Value());
-    Eigen::Matrix3f gammap = gammap_v.asDiagonal();
+    const float alpha_x_v = alpha_x->Value();
+    const float alpha_y_v = alpha_y->Value();
+    const float alpha_z_v = alpha_z->Value();
+    const float gamma_x_v = gamma_x->Value();
+    const float gamma_y_v = gamma_y->Value();
+    const float gamma_z_v = gamma_z->Value();
+    const float Kp_x_v = Kp_x->Value();
+    const float Kp_y_v = Kp_y->Value();
+    const float Kp_z_v = Kp_z->Value();
+    const float alpha_roll_v = alpha_roll->Value();
+    const float alpha_pitch_v = alpha_pitch->Value();
+    const float alpha_yaw_v = alpha_yaw->Value();
+    const float gamma_roll_v = gamma_roll->Value();
+    const float gamma_pitch_v = gamma_pitch->Value();
+    const float gamma_yaw_v = gamma_yaw->Value();
+    const float Kd_roll_v = Kd_roll->Value();
+    const float Kd_pitch_v = Kd_pitch->Value();
+    const float Kd_yaw_v = Kd_yaw->Value();
+    const float k_val = k->Value();
+    const float p1 = p_1->Value();
+    const float p_val = p->Value();
+    const float g_val = g->Value();
+    const float m_val = m->Value();
+    const float km_val = (std::abs(km->Value()) < kEps) ? (km->Value() >= 0.0F ? kEps : -kEps) : km->Value();
+    const float km_z_val = (std::abs(km_z->Value()) < kEps) ? (km_z->Value() >= 0.0F ? kEps : -kEps) : km_z->Value();
 
-    Eigen::Vector3f Kpv(Kp_x->Value(), Kp_y->Value(), Kp_z->Value());
-    Eigen::Matrix3f Kpm = Kpv.asDiagonal();
-
-    Eigen::Vector3f alphao_v(alpha_roll->Value(), alpha_pitch->Value(), alpha_yaw->Value());
-    Eigen::Matrix3f alphao = alphao_v.asDiagonal();
-
-    Eigen::Vector3f gammao_v(gamma_roll->Value(), gamma_pitch->Value(), gamma_yaw->Value());
-    Eigen::Matrix3f gammao = gammao_v.asDiagonal();
-
-    Eigen::Vector3f Kdv(Kd_roll->Value(), Kd_pitch->Value(), Kd_yaw->Value());
-    Eigen::Matrix3f Kdm = Kdv.asDiagonal();
+    const Eigen::Vector3f alphap_v(alpha_x_v, alpha_y_v, alpha_z_v);
+    const Eigen::Vector3f gammap_v(gamma_x_v, gamma_y_v, gamma_z_v);
+    const Eigen::Vector3f Kpv(Kp_x_v, Kp_y_v, Kp_z_v);
+    const Eigen::Vector3f alphao_v(alpha_roll_v, alpha_pitch_v, alpha_yaw_v);
+    const Eigen::Vector3f gammao_v(gamma_roll_v, gamma_pitch_v, gamma_yaw_v);
+    const Eigen::Vector3f Kdv(Kd_roll_v, Kd_pitch_v, Kd_yaw_v);
 
     if (T->Value() == 0) {
         delta_t = (float)(data->DataDeltaTime()) / 1000000000.0F;
@@ -356,6 +436,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     if (first_update) {
         delta_t = 0.0F;
         //first_update = false;
+    }
+    if (delta_t < 0.0F) {
+        delta_t = 0.0F;
     }
 
     const Matrix* input = dynamic_cast<const Matrix*>(data);
@@ -381,44 +464,54 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     
     input->ReleaseMutex();
 
+
+    if (q.norm() > kEps) {
+        q.normalize();
+    }
+
     //flair::core::Time t0_p = GetTime();
 
-    Eigen::Vector3f nup1 = xiep + alphap*xie;
+    Eigen::Vector3f nup1 = xiep + alphap_v.cwiseProduct(xie);
 
     if (first_update) {
         nup_t0 = nup1;
     }
 
-    Eigen::Vector3f nupd = nup_t0*exp(-k->Value()*(tactual));
+    Eigen::Vector3f nupd = 0*nup_t0*exp(-k_val*(tactual));
 
     Eigen::Vector3f nup = nup1 - nupd;
 
-    float p1 = p_1->Value();
-
     sgnpos_p = signth(nup,p1);
-    sgnpos = rk4_vec(sgnpos, sgnpos_p, delta_t);
+    sgnpos = rk4_vec(sgnpos, delta_t, [this](const Eigen::Vector3f&) { return this->sgnpos_p; });
 
-    Eigen::Vector3f nurp = nup + gammap*sgnpos;
+    Eigen::Vector3f nurp = nup + gammap_v.cwiseProduct(sgnpos);
 
-    Eigen::Vector3f xirpp = xidpp - alphap*xiep - gammap*sgnpos_p;
+    Eigen::Vector3f xirpp = xidpp - alphap_v.cwiseProduct(xiep) - gammap_v.cwiseProduct(sgnpos_p);
 
     ac2->SetValues(xie, xiep, nurp);
     ac2->Update(GetTime());
     Eigen::Vector3f NNap = Eigen::Vector3f(ac2->Output(0), ac2->Output(1), ac2->Output(2));
 
-    std::cout<<"NNap: " << NNap.transpose() << '\n';
+    //std::cout<<"NNap: " << NNap.transpose() << '\n';
 
+    Eigen::Vector3f uc = -Kpv.cwiseProduct(nurp);
+    Eigen::Vector3f u = uc + NNap; //- m->Value()*g->Value()*ez + m->Value()*xirpp
 
-    Eigen::Vector3f u = -Kpm*nurp + NNap; //- m->Value()*g->Value()*ez + m->Value()*xirpp
+    saturate(u, Eigen::Vector3f(-0.8,-0.8,-6), Eigen::Vector3f(0.8,0.8,0));
 
-    std::cout<<"u: " << u.transpose() << '\n';
+    //std::cout<<"u: " << u.transpose() << '\n';
 
     Trs = u.norm();
 
-    Eigen::Vector3f Qe3 = q.toRotationMatrix()*ez;
+    Eigen::Vector3f Qe3 = q._transformVector(ez);
 
-    Eigen::Vector3f Lambpv(p1*powf(sech(nup(0)*p1),2), p1*powf(sech(nup(1)*p1),2), p1*powf(sech(nup(2)*p1),2) );
-    Eigen::Matrix3f Lambp = Lambpv.asDiagonal();
+    Eigen::Vector3f Lambpv;
+    const float c0 = coshf(nup(0)*p1);
+    const float c1 = coshf(nup(1)*p1);
+    const float c2 = coshf(nup(2)*p1);
+    Lambpv(0) = p1 / (c0 * c0);
+    Lambpv(1) = p1 / (c1 * c1);
+    Lambpv(2) = p1 / (c2 * c2);
 
     //Eigen::Vector3f vec(sin(tactual), sin(tactual), sin(tactual));
 
@@ -439,30 +532,74 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         up = levant3.compute(u,delta_t);
         //ud = levant.Compute(vec,delta_t);
     }else{
-        up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 
-                        -alphap*(Kpm + m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
+        const float safe_m = (std::abs(m_val) < kEps) ? (m_val >= 0.0F ? kEps : -kEps) : m_val;
+        const Eigen::Vector3f gamma_lamb = gammap_v.cwiseProduct(Lambpv);
+        const Eigen::Vector3f diag_k = Kpv + safe_m * alphap_v + safe_m * gamma_lamb;
+        const Eigen::Vector3f diag_k2 = Kpv + safe_m * gamma_lamb;
+        const Eigen::Vector3f term1 = -diag_k.cwiseProduct(g_val*ez - (Trs/safe_m)*Qe3 - xidpp);
+        const Eigen::Vector3f term2 = -alphap_v.cwiseProduct(diag_k2.cwiseProduct(xiep));
+        const Eigen::Vector3f term3 = -Kpv.cwiseProduct(gammap_v.cwiseProduct(sgnpos_p));
+        const Eigen::Vector3f term4 = safe_m * xidppp;
+        up = term1 + term2 + term3 + term4;
     }
 
     
 
-    Eigen::Vector3f uh = u.normalized();
-    Eigen::Vector3f uph = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3.0F));
+    const float u_norm = u.norm();
+    Eigen::Vector3f uh = (u_norm > kEps) ? (u / u_norm) : ez;
+    Eigen::Vector3f uph = Eigen::Vector3f::Zero();
+    if (u_norm > kEps) {
+        const float u_norm2 = u_norm * u_norm;
+        const float u_dot_up = u.dot(up);
+        uph = (u_norm2 * up - u_dot_up * u) / (u_norm2 * u_norm);
+    }
 
     //std::cout << "uph: " << uph << std::endl;
 
 
-    Eigen::Quaternionf qd( (0.5F)*sqrtf((-2*uh(2))+2), uh(1)/sqrtf((-2*uh(2))+2), -uh(0)/sqrtf((-2*uh(2))+2), 0);
+    const float denom_base = (-2.0F * uh(2)) + 2.0F;
+    const float denom = std::max(denom_base, kEps);
+    const float denom_sqrt = sqrtf(denom);
+    const float inv_denom_sqrt = 1.0F / denom_sqrt;
+    const float inv_denom_3_2 = 1.0F / (denom * denom_sqrt);
 
-    Eigen::Quaternionf qdp(-(0.5F)*(uph(2)/sqrtf((-2*uh(2))+2)),
-                            (uph(1)/sqrtf((-2*uh(2))+2)) + ((uh(1)*uph(2))/powf((-2*uh(2))+2,1.5F)),
-                            -(uph(0)/sqrtf((-2*uh(2))+2)) - ((uh(0)*uph(2))/powf((-2*uh(2))+2,1.5F)),
+    Eigen::Quaternionf qd(0.5F * denom_sqrt, uh(1) * inv_denom_sqrt, -uh(0) * inv_denom_sqrt, 0);
+
+    Eigen::Quaternionf qdp(-(0.5F) * (uph(2) * inv_denom_sqrt),
+                            (uph(1) * inv_denom_sqrt) + ((uh(1) * uph(2)) * inv_denom_3_2),
+                            -(uph(0) * inv_denom_sqrt) - ((uh(0) * uph(2)) * inv_denom_3_2),
                             0);
 
     Quaternion qd2 = Quaternion(qd.w(),qd.x(),qd.y(),qd.z());
     Euler eta = qd2.ToEuler();
     // Eigen::Vector3f eta = qd.toRotationMatrix().eulerAngles(0, 1, 2);
 
-    Eigen::Quaternionf qe = q*qd.conjugate();
+    const Eigen::Quaternionf qd_conj = qd.conjugate();
+    
+    
+    // input = dynamic_cast<const Matrix*>(data);
+  
+    // if (!input) {
+    //     Warn("casting %s to Matrix failed\n",data->ObjectName().c_str(),TIME_INFINITE);
+    //     return;
+    // }
+
+
+    // input->GetMutex();
+
+    // Eigen::Vector3f w(input->ValueNoMutex(0, 6),input->ValueNoMutex(1, 6),input->ValueNoMutex(2, 6));
+
+    // q = Eigen::Quaternionf(input->ValueNoMutex(0, 7),input->ValueNoMutex(1, 7),input->ValueNoMutex(2, 7),input->ValueNoMutex(3, 7));
+    
+    // input->ReleaseMutex();
+
+    
+    // if (q.norm() > kEps) {
+    //     q.normalize();
+    // }
+    
+    
+    Eigen::Quaternionf qe = q * qd_conj;
 
     //std::cout<<"qe: " << qe.coeffs() << std::endl;
 
@@ -470,7 +607,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     //                     -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
     //                     (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
 
-    Eigen::Vector3f wd = 2.0F*(qd.conjugate()*qdp).vec();
+    Eigen::Vector3f wd = 2.0F*(qd_conj*qdp).vec();
+
+    saturate(wd, Eigen::Vector3f(-1,-1,-1), Eigen::Vector3f(1,1,1));
 
     //std::cout<<"w: " << w << std::endl;
     //std::cout<<"wd: " << wd << std::endl;
@@ -485,13 +624,17 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Eigen::Vector3f we = w - wd;
 
+    //Printf("We: %f\t %f\t %f\n", we(0), we(1), we(2));
+
     //std::cout<<"we: " << we << std::endl;
 
-    Eigen::Quaternionf QdTqe3 = qd.conjugate()*qe*qd;
+    //Eigen::Vector3f QdTqe3 = (qd.conjugate()*qe*qd).vec();
+    //Eigen::Vector3f QdTqe3 = qd.toRotationMatrix().transpose()*qe.vec();
+    Eigen::Vector3f QdTqe3 = qd_conj._transformVector(qe.vec());
 
     //std::cout<<"QdTqe3: " << QdTqe3.coeffs() << std::endl;
 
-    Eigen::Vector3f nu = we + alphao*QdTqe3.vec();
+    Eigen::Vector3f nu = we + alphao_v.cwiseProduct(QdTqe3);
 
     //std::cout<<"nu: " << nu << std::endl;
     
@@ -502,36 +645,41 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         first_update = false;
     }
     
-    Eigen::Vector3f nud = nu_t0*exp(-k->Value()*(tactual));
+    Eigen::Vector3f nud = nu_t0*exp(-k_val*(tactual));
     
     Eigen::Vector3f nuq = nu-nud;
 
-    sgnori_p = signth(nuq,p->Value());
-    sgnori = rk4_vec(sgnori, sgnori_p, delta_t);
+    sgnori_p = signth(nuq,p_val);
+    sgnori = rk4_vec(sgnori, delta_t, [this](const Eigen::Vector3f&) { return this->sgnori_p; });
 
-    Eigen::Vector3f nur = nuq + gammao*sgnori;
+    Eigen::Vector3f nur = nuq + gammao_v.cwiseProduct(sgnori);
 
-    ac1->SetValues(QdTqe3.vec(), we, nur);
+    ac1->SetValues(QdTqe3, we, nur);
     ac1->Update(GetTime());
     Eigen::Vector3f NNa = Eigen::Vector3f(ac1->Output(0), ac1->Output(1), ac1->Output(2));
     
-    std::cout<<"NNa: " << NNa.transpose() << '\n';
+    //std::cout<<"NNa: " << NNa.transpose() << '\n';
 
+    Eigen::Vector3f tauc = -Kdv.cwiseProduct(nur);
+    Eigen::Vector3f tau = tauc + NNa; // + NNa;
 
-    Eigen::Vector3f tau = -Kdm*nur + NNa;
+    //saturate(tau, Eigen::Vector3f(-0.5,-0.5,-0.8), Eigen::Vector3f(0.5,0.5,0.8));
+
+    //std::cout<<"tau: " << tau.transpose() << std::endl;
+
 
     //flair::core::Time dt_ori = GetTime() - t0_o;
 
     //lo->SetText("Latecia ori: %.3f ms",(float)dt_ori/1000000);
 
     
-    tau_roll = (float)tau(0)/km->Value();
+    tau_roll = (float)tau(0)/km_val;
     
-    tau_pitch = (float)tau(1)/km->Value();
+    tau_pitch = (float)tau(1)/km_val;
     
-    tau_yaw = (float)tau(2)/km->Value();
+    tau_yaw = (float)tau(2)/km_val;
     
-    Tr = Trs/km_z->Value();
+    Tr = Trs/km_z_val;
     
     tau_roll = -Sat(tau_roll,sat_r->Value());
     tau_pitch = -Sat(tau_pitch,sat_p->Value());
@@ -552,6 +700,19 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     state->SetValueNoMutex(10, 0, nuq.x());
     state->SetValueNoMutex(11, 0, nuq.y());
     state->SetValueNoMutex(12, 0, nuq.z());
+    state->SetValueNoMutex(13, 0, qe.w());
+    state->SetValueNoMutex(14, 0, qe.x());
+    state->SetValueNoMutex(15, 0, qe.y());
+    state->SetValueNoMutex(16, 0, qe.z());
+    state->SetValueNoMutex(17, 0, xie.x());
+    state->SetValueNoMutex(18, 0, xie.y());
+    state->SetValueNoMutex(19, 0, xie.z());
+    state->SetValueNoMutex(20, 0, uc.x());
+    state->SetValueNoMutex(21, 0, uc.y());
+    state->SetValueNoMutex(22, 0, uc.z());
+    state->SetValueNoMutex(23, 0, tauc.x());
+    state->SetValueNoMutex(24, 0, tauc.y());
+    state->SetValueNoMutex(25, 0, tauc.z());
     state->ReleaseMutex();
 
 

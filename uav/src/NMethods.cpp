@@ -1,62 +1,12 @@
 #include "NMethods.h"
-#include <Eigen/Dense>
+//#include <Eigen/Core>
 #include <cmath>
-#include <math.h>
-#include <functional>
-#include <iostream>
+//#include <math.h>
+//#include <functional>
+//#include <iostream>
 
 
-float rk4(float(*fPtr)(float), const float iC, const float iCdt, const float dt){
-    float a(0.0), b(0.0), c(0.0), d(0.0);
-    a = dt * fPtr(iCdt);
-    b = dt * fPtr(iCdt+a/2.0);
-    c = dt * fPtr(iCdt+b/2.0);
-    d = dt * fPtr(iCdt+c);
-    return ((iC + (a+d)/6.0 + (b+c)/3.0));
-}
-
-
-Eigen::Vector3f rk4_vec(const Eigen::Vector3f iC, const Eigen::Vector3f iCdt, const float dt){
-    Eigen::Vector3f integral(0,0,0);
-    integral(0) = rk4(function1d, iC(0), iCdt(0), dt);
-    integral(1) = rk4(function1d, iC(1), iCdt(1), dt);
-    integral(2) = rk4(function1d, iC(2), iCdt(2), dt);
-    return integral;
-}
-
-
-Eigen::Vector3f rk4_vec3f(const Eigen::Vector3f& x, 
-                          std::function<Eigen::Vector3f(const Eigen::Vector3f&)> derivative, 
-                          float dt) {
-    // Optimized RK4 for 3D vectors with non-linear dynamics
-    const Eigen::Vector3f k1 = derivative(x);
-    const Eigen::Vector3f k2 = derivative(x + 0.5f * dt * k1);
-    const Eigen::Vector3f k3 = derivative(x + 0.5f * dt * k2);
-    const Eigen::Vector3f k4 = derivative(x + dt * k3);
-    
-    // Use optimized computation: x + dt/6 * (k1 + 2*k2 + 2*k3 + k4)
-    return x + (dt / 6.0f) * (k1 + 2.0f * k2 + 2.0f * k3 + k4);
-}
-
-
-Eigen::VectorXf rk4_vecXf(const Eigen::VectorXf& x, 
-                          std::function<Eigen::VectorXf(const Eigen::VectorXf&)> derivative, 
-                          float dt) {
-    // Optimized RK4 for dynamic-sized vectors with non-linear dynamics
-    const Eigen::VectorXf k1 = derivative(x);
-    const Eigen::VectorXf k2 = derivative(x + 0.5f * dt * k1);
-    const Eigen::VectorXf k3 = derivative(x + 0.5f * dt * k2);
-    const Eigen::VectorXf k4 = derivative(x + dt * k3);
-    
-    return x + (dt / 6.0f) * (k1 + 2.0f * k2 + 2.0f * k3 + k4);
-}
-
-
-/*! \fn function1d.
- */
-float function1d(float iCdt){
-    return iCdt;
-}
+// RK4 implementations are templated in the header.
 
 /*! \fn sign, función que contiene la función signo.
  */
@@ -90,7 +40,7 @@ float signth(const float a, const float p){
     return tanhf(p*a);
 }
 
-Eigen::Vector3f signth(const Eigen::Vector3f a, const float p){
+Eigen::Vector3f signth(const Eigen::Vector3f& a, const float p){
     Eigen::Vector3f salida;
     salida(0) = tanhf(p*a(0));
     salida(1) = tanhf(p*a(1));
@@ -117,7 +67,7 @@ void Levant_diff::setParam(const float alpha, const float lamb){
     this->lamb = lamb;
 }
 
-void Levant_diff::setParam_vec(const Eigen::Vector3f alpha, const Eigen::Vector3f lamb){
+void Levant_diff::setParam_vec(const Eigen::Vector3f& alpha, const Eigen::Vector3f& lamb){
     this->alpha_vec = alpha;
     this->lamb_vec = lamb;
 }
@@ -133,26 +83,26 @@ void Levant_diff::Reset(void){
     this->u1p_vec << 0, 0, 0;
 }
 
-float Levant_diff::Compute(const float f, const float dt){
+float Levant_diff::Compute(const float& f, const float dt){
     u = u1 - lamb*(sqrtf(fabs(x-f)))*sign_(x-f);
 
     u1p = -alpha*sign_(x-f);
-    x = rk4(function1d, x, u, dt);
-    u1 = rk4(function1d, u1, u1p, dt);
+    x = rk4(x, dt, [this](float) { return this->u; });
+    u1 = rk4(u1, dt, [this](float) { return this->u1p; });
 
     err = x-f;
     return u;
 }
 
-void Levant_diff::Compute(float &_u, const float f, const float dt){
+void Levant_diff::Compute(float &_u, const float& f, const float dt){
     _u = u1 - lamb*(sqrtf(fabs(x-f)))*sign_(x-f);
 
     u1p = -alpha*sign_(x-f);
-    x = rk4(function1d, x, _u, dt);
-    u1 = rk4(function1d, u1, u1p, dt);
+    x = rk4(x, dt, [_u](float) { return _u; });
+    u1 = rk4(u1, dt, [this](float) { return this->u1p; });
 }
 
-Eigen::Vector3f Levant_diff::Compute(const Eigen::Vector3f f, const float dt){
+Eigen::Vector3f Levant_diff::Compute(const Eigen::Vector3f& f, const float dt){
     u_vec(0) = u1_vec(0) - lamb_vec(0)*(sqrtf(fabs(x_vec(0)-f(0))))*sign_(x_vec(0)-f(0));
     u_vec(1) = u1_vec(1) - lamb_vec(1)*(sqrtf(fabs(x_vec(1)-f(1))))*sign_(x_vec(1)-f(1));
     u_vec(2) = u1_vec(2) - lamb_vec(2)*(sqrtf(fabs(x_vec(2)-f(2))))*sign_(x_vec(2)-f(2));
@@ -161,8 +111,8 @@ Eigen::Vector3f Levant_diff::Compute(const Eigen::Vector3f f, const float dt){
     u1p_vec(1) = -alpha_vec(1)*sign_(x_vec(1)-f(1));
     u1p_vec(2) = -alpha_vec(2)*sign_(x_vec(2)-f(2));
 
-    x_vec = rk4_vec(x_vec, u_vec, dt);
-    u1_vec = rk4_vec(u1_vec, u1p_vec, dt);
+    x_vec = rk4_vec(x_vec, dt, [this](const Eigen::Vector3f&) { return this->u_vec; });
+    u1_vec = rk4_vec(u1_vec, dt, [this](const Eigen::Vector3f&) { return this->u1p_vec; });
 
     err_v = x_vec-f;
     return u_vec;
@@ -195,6 +145,7 @@ Levant3::Levant3(uint8_t _mode, float _L, double _p): mode(_mode), L(_L), p(_p) 
     nu1 = Eigen::Vector3f::Zero();
     nu2 = Eigen::Vector3f::Zero();
     z3p = Eigen::Vector3f::Zero();
+    updateLPowers();
 }
 
 Levant3::~Levant3() {}
@@ -202,6 +153,19 @@ Levant3::~Levant3() {}
 void Levant3::setParam(double L, double p) {
     this->L = L;
     this->p = p;
+    updateLPowers();
+}
+
+void Levant3::updateLPowers() {
+    if (!std::isfinite(L) || L <= 0.0) {
+        L_p14 = 0.0;
+        L_p13 = 0.0;
+        L_p12 = 0.0;
+        return;
+    }
+    L_p14 = std::sqrt(std::sqrt(L));
+    L_p13 = std::cbrt(L);
+    L_p12 = std::sqrt(L);
 }
 
 void Levant3::Reset() {
@@ -221,45 +185,61 @@ void Levant3::Reset() {
     z3_1 = Eigen::Vector3f::Zero();
 }
 
-double Levant3::compute(double f, float dt) {
-    double nu0 = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0-f),3.0/4.0F)*sign_(z0-f)) + z1;
-    double nu1 = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1-nu0),2.0/3.0F)*sign_(z1-nu0)) + z2;
-    double nu2 = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2-nu1),1.0/2.0F)*sign_(z2-nu1)) + z3;
-    double z3p = -1.1F*L*sign_(z3-nu2);
+double Levant3::compute(double& f, float dt) {
+    const double e0 = z0 - f;
+    const double abs_e0 = std::fabs(e0);
+    const double e0_3_4 = std::sqrt(std::sqrt(abs_e0 * abs_e0 * abs_e0));
 
-    z0 = rk4(function1d,z0,nu0,dt);
-    z1 = rk4(function1d,z1,nu1,dt);
-    z2 = rk4(function1d,z2,nu2,dt);
-    z3 = rk4(function1d,z3,z3p,dt);
+    const double nu0_local = (-50.0 * L_p14 * e0_3_4 * sign_(e0)) + z1;
+    const double e1_local = z1 - nu0_local;
+    const double abs_e1 = std::fabs(e1_local);
+    const double e1_2_3 = std::cbrt(abs_e1 * abs_e1);
+
+    const double nu1_local = (-20.0 * L_p13 * e1_2_3 * sign_(e1_local)) + z2;
+    const double e2_local = z2 - nu1_local;
+    const double abs_e2 = std::fabs(e2_local);
+    const double e2_1_2 = std::sqrt(abs_e2);
+
+    const double nu2_local = (-8.0 * L_p12 * e2_1_2 * sign_(e2_local)) + z3;
+    const double z3p_local = -1.1 * L * sign_(z3 - nu2_local);
+
+    z0 = rk4(z0, static_cast<double>(dt), [nu0_local](double) { return nu0_local; });
+    z1 = rk4(z1, static_cast<double>(dt), [nu1_local](double) { return nu1_local; });
+    z2 = rk4(z2, static_cast<double>(dt), [nu2_local](double) { return nu2_local; });
+    z3 = rk4(z3, static_cast<double>(dt), [z3p_local](double) { return z3p_local; });
 
     //fp = nu0;
     //fp = nu0; // Compute the first derivative (velocity)
 
-    return nu0;
+    return nu0_local;
 }
 
-Eigen::Vector3f Levant3::compute(const Eigen::Vector3f f, float dt) {
-    
-    nu0(0) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(0)-f(0)),3.0/4.0F)*sign_(z0_1(0)-f(0))) + z1_1(0);
-    nu0(1) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(1)-f(1)),3.0/4.0F)*sign_(z0_1(1)-f(1))) + z1_1(1);
-    nu0(2) = (-50.0F*pow(L,1.0/4.0F)*pow(fabs(z0_1(2)-f(2)),3.0/4.0F)*sign_(z0_1(2)-f(2))) + z1_1(2);
+Eigen::Vector3f Levant3::compute(const Eigen::Vector3f& f, float dt) {
+    for (int i = 0; i < 3; ++i) {
+        const float e0 = z0_1(i) - f(i);
+        const float abs_e0 = std::fabs(e0);
+        const float e0_3_4 = std::sqrt(std::sqrt(abs_e0 * abs_e0 * abs_e0));
 
-    nu1(0) = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1_1(0)-nu0(0)),2.0/3.0F)*sign_(z1_1(0)-nu0(0))) + z2_1(0);
-    nu1(1) = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1_1(1)-nu0(1)),2.0/3.0F)*sign_(z1_1(1)-nu0(1))) + z2_1(1);
-    nu1(2) = (-20.0F*pow(L,1.0/3.0F)*pow(fabs(z1_1(2)-nu0(2)),2.0/3.0F)*sign_(z1_1(2)-nu0(2))) + z2_1(2);
+        nu0(i) = (-50.0F * static_cast<float>(L_p14) * e0_3_4 * static_cast<float>(sign_(e0))) + z1_1(i);
 
-    nu2(0) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(0)-nu1(0)),1.0/2.0F)*sign_(z2_1(0)-nu1(0))) + z3_1(0);
-    nu2(1) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(1)-nu1(1)),1.0/2.0F)*sign_(z2_1(1)-nu1(1))) + z3_1(1);
-    nu2(2) = (-8.0F*pow(L,1.0/2.0F)*pow(fabs(z2_1(2)-nu1(2)),1.0/2.0F)*sign_(z2_1(2)-nu1(2))) + z3_1(2);
+        const float e1 = z1_1(i) - nu0(i);
+        const float abs_e1 = std::fabs(e1);
+        const float e1_2_3 = std::cbrt(abs_e1 * abs_e1);
 
-    z3p(0) = -1.1F*L*sign_(z3_1(0)-nu2(0)); 
-    z3p(1) = -1.1F*L*sign_(z3_1(1)-nu2(1));
-    z3p(2) = -1.1F*L*sign_(z3_1(2)-nu2(2));
+        nu1(i) = (-20.0F * static_cast<float>(L_p13) * e1_2_3 * static_cast<float>(sign_(e1))) + z2_1(i);
 
-    z0_1 = rk4_vec(z0_1,nu0,dt);
-    z1_1 = rk4_vec(z1_1,nu1,dt);
-    z2_1 = rk4_vec(z2_1,nu2,dt);
-    z3_1 = rk4_vec(z3_1,z3p,dt);
+        const float e2 = z2_1(i) - nu1(i);
+        const float abs_e2 = std::fabs(e2);
+        const float e2_1_2 = std::sqrt(abs_e2);
+
+        nu2(i) = (-8.0F * static_cast<float>(L_p12) * e2_1_2 * static_cast<float>(sign_(e2))) + z3_1(i);
+        z3p(i) = -1.1F * static_cast<float>(L) * static_cast<float>(sign_(z3_1(i) - nu2(i)));
+    }
+
+    z0_1 = rk4_vec(z0_1, dt, [this](const Eigen::Vector3f&) { return this->nu0; });
+    z1_1 = rk4_vec(z1_1, dt, [this](const Eigen::Vector3f&) { return this->nu1; });
+    z2_1 = rk4_vec(z2_1, dt, [this](const Eigen::Vector3f&) { return this->nu2; });
+    z3_1 = rk4_vec(z3_1, dt, [this](const Eigen::Vector3f&) { return this->z3p; });
 
     
 

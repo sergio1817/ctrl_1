@@ -17,7 +17,7 @@
 #include "NMethods.h"
 #include <ControlLaw.h>
 #include <Eigen/Core>
-#include <Eigen/Geometry>
+#include <algorithm>
 #include <Vector3D.h>
 #include "AC1.h"
 
@@ -86,6 +86,10 @@ public:
     void UseDefaultPlot11(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot12(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot13(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot14(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot15(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot16(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot17(const flair::gui::LayoutPosition *position);
 
     
     
@@ -121,6 +125,13 @@ private:
     Eigen::Vector3f nu_t0, nup_t0;
 
     //flair::core::Vector3ff sgnori_p, sgnori;
+
+    static void saturate(Eigen::Vector3f& vec, Eigen::Vector3f min_val, Eigen::Vector3f max_val) {
+        for (int i = 0; i < vec.size(); ++i) {
+            vec(i) = std::min(vec(i), max_val(i)); 
+            vec(i) = std::max(vec(i), min_val(i));
+        }
+    }
     
     
 };

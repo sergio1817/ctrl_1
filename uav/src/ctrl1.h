@@ -15,6 +15,7 @@
 #define CTRL1_H
 
 #include <UavStateMachine.h>
+#include <VrpnClient.h>
 #include "Sliding.h"
 #include "Sliding_pos.h"
 //#include "Sliding_force.h"
@@ -41,6 +42,7 @@ namespace flair {
     }
     namespace sensor {
         class TargetController;
+        class VrpnClient;
         //class TargetJR3;
     }
 }
@@ -82,6 +84,7 @@ class ctrl1 : public flair::meta::UavStateMachine {
         //flair::filter::Sliding_force *u_sliding_force;
 
         flair::meta::MetaVrpnObject *uavVrpn;
+        flair::sensor::VrpnClient *vrpnclient;
         
         //bool first_update;
 
@@ -91,7 +94,7 @@ class ctrl1 : public flair::meta::UavStateMachine {
 
         flair::gui::PushButton *start_prueba1,*stop_prueba1;
         flair::gui::ComboBox *control_select, *position_behavior, *xd_behavior, *yd_behavior, *zd_behavior;   
-        flair::gui::Tab *setupLawTab2, *graphLawTab2, *lawTab2, *setupLawTab3, *graphLawTab3,*graphLawTab4, *positionTab, *positiongTab;
+        flair::gui::Tab *setupLawTab2, *graphLawTab2, *lawTab2, *setupLawTab3, *graphLawTab3,*graphLawTab4, *positionTab, *positiongTab, *graphLawTab5, *graphLawTab6;
         flair::gui::TabWidget *tabWidget2, *Pos_tabWidget;
         flair::gui::GroupBox *seg;
         flair::gui::Label *l, *l2, *lx, *ly, *lz;

@@ -569,7 +569,7 @@ void Sliding_force::UpdateFrom(const io_data *data) {
 
 //     sgnfxp = signth(Sfx,mu->Value());
 
-//     sgnfx = rk4(function1d,sgnfx,sgnfxp,delta_t);
+//     sgnfx = rk4(sgnfx, delta_t, [sgnfxp](float) { return sgnfxp; });
 
 //     tau_pitch = -kf_x->Value()*(Sfx + gamma_fx->Value()*sgnfx);
 
@@ -628,7 +628,7 @@ void Sliding_force::ForcePosition(Eigen::Vector3f &u, const Eigen::Vector3f xie,
 
     float dF = F(0)-Fd(0);
 
-    dFi_ = rk4(function1d,dFi_,dF,delta_t);
+    dFi_ = rk4(dFi_, delta_t, [dF](float) { return dF; });
 
     Eigen::Vector3f dFi(dFi_,0,0);
 
@@ -639,8 +639,8 @@ void Sliding_force::ForcePosition(Eigen::Vector3f &u, const Eigen::Vector3f xie,
 
     //std::cout << "dLamb: \n" << dLamb << std::endl;
 
-    Sf(0) = rk4(function1d,Sf(0),dLamb(0),delta_t);
-    Sf(1) = rk4(function1d,Sf(1),dLamb(1),delta_t);
+    Sf(0) = rk4(Sf(0), delta_t, [this](float) { return this->dLamb(0); });
+    Sf(1) = rk4(Sf(1), delta_t, [this](float) { return this->dLamb(1); });
 
     //Sf = dLamb;
 
@@ -658,8 +658,8 @@ void Sliding_force::ForcePosition(Eigen::Vector3f &u, const Eigen::Vector3f xie,
     sgnfp(1) = signth(Sqf(1),muf->Value());
 
 
-    sgnf(0) = rk4(function1d,sgnf(0),sgnfp(0),delta_t);
-    sgnf(1) = rk4(function1d,sgnf(1),sgnfp(1),delta_t);
+    sgnf(0) = rk4(sgnf(0), delta_t, [this](float) { return this->sgnfp(0); });
+    sgnf(1) = rk4(sgnf(1), delta_t, [this](float) { return this->sgnfp(1); });
 
     Eigen::Vector2f Svf = Sqf + gammaf*sgnf;
 
@@ -669,7 +669,7 @@ void Sliding_force::ForcePosition(Eigen::Vector3f &u, const Eigen::Vector3f xie,
     Eigen::Vector3f nup = xiep + alphap*xie - alphapf*dFi;
 
     sgnpos_p = signth(nup,mup->Value());
-    sgnpos = rk4_vec(sgnpos, sgnpos_p, delta_t);
+    sgnpos = rk4_vec(sgnpos, delta_t, [this](const Eigen::Vector3f&) { return this->sgnpos_p; });
 
     Eigen::Vector3f nurp = nup + gammap*sgnpos;
 
@@ -749,7 +749,7 @@ void Sliding_force::Position(Eigen::Vector3f &u, const Eigen::Vector3f xie, cons
     Eigen::Vector3f nup = xiep + alphap*xie;
 
     sgnpos_p = signth(nup,1);
-    sgnpos = rk4_vec(sgnpos, sgnpos_p, delta_t);
+    sgnpos = rk4_vec(sgnpos, delta_t, [this](const Eigen::Vector3f&) { return this->sgnpos_p; });
 
     Eigen::Vector3f nurp = nup + gammap*sgnpos;
 
@@ -825,7 +825,7 @@ void Sliding_force::Orientation(Eigen::Vector3f &tau, const Eigen::Quaternionf q
     Eigen::Vector3f nuq = nu-nud;
 
     sgnori_p = signth(nuq,p->Value());
-    sgnori = rk4_vec(sgnori, sgnori_p, delta_t);
+    sgnori = rk4_vec(sgnori, delta_t, [this](const Eigen::Vector3f&) { return this->sgnori_p; });
 
     Eigen::Vector3f nur = nuq + gammao*sgnori;
 

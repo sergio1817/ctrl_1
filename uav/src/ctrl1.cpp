@@ -47,7 +47,12 @@ using namespace flair::filter;
 using namespace flair::meta;
 
 
-ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behaviourMode(BehaviourMode_t::Default), vrpnLost(false) {
+ctrl1::ctrl1(TargetController *controller)
+        : UavStateMachine(controller),
+            behaviourMode(BehaviourMode_t::Default),
+            vrpnLost(false),
+            uavVrpn(nullptr),
+            vrpnclient(nullptr) {
     Uav* uav=GetUav();
 
     // std::string ip_dir;
@@ -57,7 +62,7 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     //     ip_dir = "192.168.147.103:3883";
     // }
     //ip_dir = "192.168.147.103:3883";
-    VrpnClient* vrpnclient=new VrpnClient("vrpn", uav->GetDefaultVrpnAddress(),80,uav->GetDefaultVrpnConnectionType());
+    vrpnclient = new VrpnClient("vrpn", uav->GetDefaultVrpnAddress(), 80, uav->GetDefaultVrpnConnectionType());
     
     
     if(vrpnclient->ConnectionType()==VrpnClient::Xbee) {
@@ -89,18 +94,26 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     
     Tab *lawTab2 = new Tab(getFrameworkManager()->GetTabWidget(), "control laws custom");
     TabWidget *tabWidget2 = new TabWidget(lawTab2->NewRow(), "laws");
+
+    Tab *lawTab4 = new Tab(getFrameworkManager()->GetTabWidget(), "Position");
+    TabWidget *tabWidget4 = new TabWidget(lawTab4->NewRow(), "parameters");
+
+    Tab *lawTab3 = new Tab(getFrameworkManager()->GetTabWidget(), "RL");
+    TabWidget *tabWidget3 = new TabWidget(lawTab3->NewRow(), "plots");
     
     setupLawTab2 = new Tab(tabWidget2, "Setup Sliding");
     setupLawTab3 = new Tab(tabWidget2, "Setup Sliding Pos");
-    graphLawTab2 = new Tab(tabWidget2, "Graficas Sliding");
-    graphLawTab3 = new Tab(tabWidget2, "Graficas Sliding Pos");
-    graphLawTab4 = new Tab(tabWidget2, "Graficas AC");
+    graphLawTab2 = new Tab(tabWidget2, "Plots Sliding");
+    graphLawTab3 = new Tab(tabWidget2, "Plots Sliding Pos");
+    graphLawTab5 = new Tab(tabWidget3, "Plots AC ori");
+    graphLawTab4 = new Tab(tabWidget3, "Plots AC full");
+    graphLawTab6 = new Tab(tabWidget2, "Plots Errors");
 
     //Tab *posTab = new Tab(getFrameworkManager()->GetTabWidget(), "position");
     //TabWidget *Pos_tabWidget = new TabWidget(posTab->NewRow(), "position");
 
-    positionTab = new Tab(tabWidget2, "Reference position");
-    positiongTab = new Tab(tabWidget2, "Desired orientation");
+    positionTab = new Tab(tabWidget4, "Reference position");
+    positiongTab = new Tab(tabWidget4, "Desired orientation");
 
     GroupBox *posbox = new GroupBox(positionTab->NewRow(), "Setup reference");
     GroupBox *regbox = new GroupBox(positionTab->NewRow(), "Setup regulation");
@@ -173,6 +186,8 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     u_sliding->UseDefaultPlot3(graphLawTab2->At(0, 2));
     u_sliding->UseDefaultPlot4(graphLawTab2->At(1, 2));
     u_sliding->UseDefaultPlot5(graphLawTab2->At(1, 0));
+    u_sliding->UseDefaultPlot6(graphLawTab5->At(0, 0));
+    u_sliding->UseDefaultPlot7(graphLawTab5->At(0, 1));
 
     u_sliding_pos = new Sliding_pos(setupLawTab3->At(0, 0), "u_smc_pos");
     u_sliding_pos->UseDefaultPlot(graphLawTab3->At(0, 0));
@@ -187,11 +202,15 @@ ctrl1::ctrl1(TargetController *controller): UavStateMachine(controller), behavio
     u_sliding_pos->UseDefaultPlot6(positiongTab->At(0, 1));
     u_sliding_pos->UseDefaultPlot7(positiongTab->At(0, 2));
 
-    u_sliding_pos->UseDefaultPlot10(graphLawTab4->At(0, 0));
-    u_sliding_pos->UseDefaultPlot11(graphLawTab4->At(0, 1));
-    u_sliding_pos->UseDefaultPlot12(graphLawTab4->At(1, 0));
-    u_sliding_pos->UseDefaultPlot13(graphLawTab4->At(1, 1));
+    u_sliding_pos->UseDefaultPlot17(graphLawTab4->At(0, 0));
+    u_sliding_pos->UseDefaultPlot10(graphLawTab4->At(0, 1));
+    u_sliding_pos->UseDefaultPlot11(graphLawTab4->At(0, 2));
+    u_sliding_pos->UseDefaultPlot16(graphLawTab4->At(1, 0));
+    u_sliding_pos->UseDefaultPlot12(graphLawTab4->At(1, 1));
+    u_sliding_pos->UseDefaultPlot13(graphLawTab4->At(1, 2));
 
+    u_sliding_pos->UseDefaultPlot14(graphLawTab6->At(0, 0));
+    u_sliding_pos->UseDefaultPlot15(graphLawTab6->At(0, 1));
     
     
     customOrientation=new AhrsData(this,"orientation");
@@ -304,15 +323,31 @@ ctrl1::~ctrl1() {
         delete u_sliding; 
         u_sliding = nullptr; 
     }
-    if (u_sliding_pos != nullptr) { delete u_sliding_pos; u_sliding_pos = nullptr; }
-    //if (u_sliding_force != nullptr) { delete u_sliding_force; u_sliding_force = nullptr; }
+    if (u_sliding_pos != nullptr) { 
+        delete u_sliding_pos; 
+        u_sliding_pos = nullptr; 
+    }
+    //if (u_sliding_force != nullptr) { 
+    //    delete u_sliding_force; 
+    //    u_sliding_force = nullptr; 
+    //}
 
     // delete VRPN objects if they were created
     if (uavVrpn != nullptr) {
         delete uavVrpn; 
-        uavVrpn = nullptr; }
+        uavVrpn = nullptr; 
+    }
 
-    if (customOrientation != nullptr) { delete customOrientation; customOrientation = nullptr; }
+    if (customOrientation != nullptr) { 
+        delete customOrientation; 
+        customOrientation = nullptr; 
+    }
+
+    if (vrpnclient != nullptr) {
+        //vrpnclient->Stop();
+        delete vrpnclient; 
+        vrpnclient = nullptr; 
+    }
 }
 
 //this method is called by UavStateMachine::Run (main loop) when TorqueMode is Custom
@@ -486,12 +521,186 @@ void ctrl1::Stopctrl1(void) {
     EnterFailSafeMode();
 }
 
-void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vector3Df &xidppp, float tactual){
+// void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vector3Df &xidppp, float tactual){
     
+//     switch(position_behavior->CurrentIndex()){
+//     case 0:
+//     // regulation
+//     xid = Vector3Df(static_cast<float>(xd->Value()), static_cast<float>(yd->Value()), static_cast<float>(zd->Value()));
+//         xidp = Vector3Df(0,0,0);
+//         xidpp = Vector3Df(0,0,0);
+//         xidppp = Vector3Df(0,0,0);
+//         break;
+    
+//     case 1:
+//         // tracking
+//     switch(xd_behavior->CurrentIndex()){
+//         case 0:
+//             // regulation
+//             xid.x = static_cast<float>(xd->Value());
+//             xidp.x = 0;
+//             xidpp.x = 0;
+//             xidppp.x = 0;
+//             break;
+//         case 1:
+//             // sin
+//             xid.x = static_cast<float>((ax->Value()*sin(wx->Value()*tactual))+bx->Value());
+//             xidp.x = static_cast<float>(ax->Value()*wx->Value()*cos(wx->Value()*tactual));
+//             xidpp.x = static_cast<float>(-ax->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual));
+//             xidppp.x = static_cast<float>(-ax->Value()*wx->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual));
+//             break;
+//         case 2:
+//             // cos
+//             xid.x = static_cast<float>((ax->Value()*cos(wx->Value()*tactual))+bx->Value());
+//             xidp.x = static_cast<float>(-ax->Value()*wx->Value()*sin(wx->Value()*tactual));
+//             xidpp.x = static_cast<float>(-ax->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual));
+//             xidppp.x = static_cast<float>(ax->Value()*wx->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual));
+//             break;
+//         default:
+//             xid.x = static_cast<float>(xd->Value());
+//             xidp.x = 0.0F;
+//             xidpp.x = 0.0F;
+//             xidppp.x = 0.0F;
+//             break;
+//         }
+
+//     switch(yd_behavior->CurrentIndex()){
+//         case 0:
+//             // regulation
+//             xid.y = static_cast<float>(yd->Value());
+//             xidp.y = 0;
+//             xidpp.y = 0;
+//             xidppp.y = 0;
+//             break;
+//         case 1:
+//             // sin
+//             xid.y = static_cast<float>((ay->Value()*sin(wy->Value()*tactual))+by->Value());
+//             xidp.y = static_cast<float>(ay->Value()*wy->Value()*cos(wy->Value()*tactual));
+//             xidpp.y = static_cast<float>(-ay->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual));
+//             xidppp.y = static_cast<float>(-ay->Value()*wy->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual));
+//             break;
+//         case 2:
+//             // cos
+//             xid.y = static_cast<float>((ay->Value()*cos(wy->Value()*tactual))+by->Value());
+//             xidp.y = static_cast<float>(-ay->Value()*wy->Value()*sin(wy->Value()*tactual));
+//             xidpp.y = static_cast<float>(-ay->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual));
+//             xidppp.y = static_cast<float>(ay->Value()*wy->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual));
+//             break;
+//         default:
+//             xid.y = static_cast<float>(yd->Value());
+//             xidp.y = 0.0F;
+//             xidpp.y = 0.0F;
+//             xidppp.y = 0.0F;
+//             break;
+//         }
+
+//     switch(zd_behavior->CurrentIndex()){
+//         case 0:
+//             // regulation
+//             xid.z = static_cast<float>(zd->Value());
+//             xidp.z = 0;
+//             xidpp.z = 0;
+//             xidppp.z = 0;
+//             break;
+//         case 1:
+//             // sin
+//             xid.z = static_cast<float>((az->Value()*sin(wz->Value()*tactual))+bz->Value());
+//             xidp.z = static_cast<float>(az->Value()*wz->Value()*cos(wz->Value()*tactual));
+//             xidpp.z = static_cast<float>(-az->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual));
+//             xidppp.z = static_cast<float>(-az->Value()*wz->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual));
+//             break;
+//         case 2:
+//             // cos
+//             xid.z = static_cast<float>((az->Value()*cos(wz->Value()*tactual))+bz->Value());
+//             xidp.z = static_cast<float>(-az->Value()*wz->Value()*sin(wz->Value()*tactual));
+//             xidpp.z = static_cast<float>(-az->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual));
+//             xidppp.z = static_cast<float>(az->Value()*wz->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual));
+//             break;
+//         default:
+//             xid.z = static_cast<float>(zd->Value());
+//             xidp.z = 0.0F;
+//             xidpp.z = 0.0F;
+//             xidppp.z = 0.0F;
+//             break;
+//         }
+//         break;
+    
+//     case 2:
+//         // trajectory
+//         break;
+//     default:
+//         xid = Vector3Df(0,0,0);
+//         xidp = Vector3Df(0,0,0);
+//         xidpp = Vector3Df(0,0,0);
+//         xidppp = Vector3Df(0,0,0);
+//         break;
+//     }
+// }
+
+void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vector3Df &xidppp, float tactual){
+    constexpr float kEps = 1e-6f;
+    const float xd_val = static_cast<float>(xd->Value());
+    const float yd_val = static_cast<float>(yd->Value());
+    const float zd_val = static_cast<float>(zd->Value());
+    const float ax_val = static_cast<float>(ax->Value());
+    const float ay_val = static_cast<float>(ay->Value());
+    const float az_val = static_cast<float>(az->Value());
+    const float wx_val = static_cast<float>(wx->Value());
+    const float wy_val = static_cast<float>(wy->Value());
+    const float wz_val = static_cast<float>(wz->Value());
+    const float bx_val = static_cast<float>(bx->Value());
+    const float by_val = static_cast<float>(by->Value());
+    const float bz_val = static_cast<float>(bz->Value());
+
+    auto fill_axis = [&](int behavior, float xd_axis, float a, float w, float b,
+                         float &out, float &outp, float &outpp, float &outppp) {
+        switch (behavior) {
+        case 0:
+            out = xd_axis;
+            outp = 0.0F;
+            outpp = 0.0F;
+            outppp = 0.0F;
+            break;
+        case 1: {
+            const float wt = w * tactual;
+            const float s = sinf(wt);
+            const float c = cosf(wt);
+            const float w2 = w * w;
+            const float w3 = w2 * w;
+            out = a * s + b;
+            outp = a * w * c;
+            outpp = -a * w2 * s;
+            outppp = -a * w3 * c;
+            break; }
+        case 2: {
+            const float wt = w * tactual;
+            const float s = sinf(wt);
+            const float c = cosf(wt);
+            const float w2 = w * w;
+            const float w3 = w2 * w;
+            out = a * c + b;
+            outp = -a * w * s;
+            outpp = -a * w2 * c;
+            outppp = a * w3 * s;
+            break; }
+        default:
+            out = xd_axis;
+            outp = 0.0F;
+            outpp = 0.0F;
+            outppp = 0.0F;
+            break;
+        }
+        if (std::abs(w) < kEps) {
+            outp = 0.0F;
+            outpp = 0.0F;
+            outppp = 0.0F;
+        }
+    };
+
     switch(position_behavior->CurrentIndex()){
     case 0:
     // regulation
-    xid = Vector3Df(static_cast<float>(xd->Value()), static_cast<float>(yd->Value()), static_cast<float>(zd->Value()));
+    xid = Vector3Df(xd_val, yd_val, zd_val);
         xidp = Vector3Df(0,0,0);
         xidpp = Vector3Df(0,0,0);
         xidppp = Vector3Df(0,0,0);
@@ -499,99 +708,20 @@ void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vec
     
     case 1:
         // tracking
-    switch(xd_behavior->CurrentIndex()){
-        case 0:
-            // regulation
-            xid.x = static_cast<float>(xd->Value());
-            xidp.x = 0;
-            xidpp.x = 0;
-            xidppp.x = 0;
-            break;
-        case 1:
-            // sin
-            xid.x = static_cast<float>((ax->Value()*sin(wx->Value()*tactual))+bx->Value());
-            xidp.x = static_cast<float>(ax->Value()*wx->Value()*cos(wx->Value()*tactual));
-            xidpp.x = static_cast<float>(-ax->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual));
-            xidppp.x = static_cast<float>(-ax->Value()*wx->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual));
-            break;
-        case 2:
-            // cos
-            xid.x = static_cast<float>((ax->Value()*cos(wx->Value()*tactual))+bx->Value());
-            xidp.x = static_cast<float>(-ax->Value()*wx->Value()*sin(wx->Value()*tactual));
-            xidpp.x = static_cast<float>(-ax->Value()*wx->Value()*wx->Value()*cos(wx->Value()*tactual));
-            xidppp.x = static_cast<float>(ax->Value()*wx->Value()*wx->Value()*wx->Value()*sin(wx->Value()*tactual));
-            break;
-        default:
-            xid.x = static_cast<float>(xd->Value());
-            xidp.x = 0.0F;
-            xidpp.x = 0.0F;
-            xidppp.x = 0.0F;
-            break;
-        }
-
-    switch(yd_behavior->CurrentIndex()){
-        case 0:
-            // regulation
-            xid.y = static_cast<float>(yd->Value());
-            xidp.y = 0;
-            xidpp.y = 0;
-            xidppp.y = 0;
-            break;
-        case 1:
-            // sin
-            xid.y = static_cast<float>((ay->Value()*sin(wy->Value()*tactual))+by->Value());
-            xidp.y = static_cast<float>(ay->Value()*wy->Value()*cos(wy->Value()*tactual));
-            xidpp.y = static_cast<float>(-ay->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual));
-            xidppp.y = static_cast<float>(-ay->Value()*wy->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual));
-            break;
-        case 2:
-            // cos
-            xid.y = static_cast<float>((ay->Value()*cos(wy->Value()*tactual))+by->Value());
-            xidp.y = static_cast<float>(-ay->Value()*wy->Value()*sin(wy->Value()*tactual));
-            xidpp.y = static_cast<float>(-ay->Value()*wy->Value()*wy->Value()*cos(wy->Value()*tactual));
-            xidppp.y = static_cast<float>(ay->Value()*wy->Value()*wy->Value()*wy->Value()*sin(wy->Value()*tactual));
-            break;
-        default:
-            xid.y = static_cast<float>(yd->Value());
-            xidp.y = 0.0F;
-            xidpp.y = 0.0F;
-            xidppp.y = 0.0F;
-            break;
-        }
-
-    switch(zd_behavior->CurrentIndex()){
-        case 0:
-            // regulation
-            xid.z = static_cast<float>(zd->Value());
-            xidp.z = 0;
-            xidpp.z = 0;
-            xidppp.z = 0;
-            break;
-        case 1:
-            // sin
-            xid.z = static_cast<float>((az->Value()*sin(wz->Value()*tactual))+bz->Value());
-            xidp.z = static_cast<float>(az->Value()*wz->Value()*cos(wz->Value()*tactual));
-            xidpp.z = static_cast<float>(-az->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual));
-            xidppp.z = static_cast<float>(-az->Value()*wz->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual));
-            break;
-        case 2:
-            // cos
-            xid.z = static_cast<float>((az->Value()*cos(wz->Value()*tactual))+bz->Value());
-            xidp.z = static_cast<float>(-az->Value()*wz->Value()*sin(wz->Value()*tactual));
-            xidpp.z = static_cast<float>(-az->Value()*wz->Value()*wz->Value()*cos(wz->Value()*tactual));
-            xidppp.z = static_cast<float>(az->Value()*wz->Value()*wz->Value()*wz->Value()*sin(wz->Value()*tactual));
-            break;
-        default:
-            xid.z = static_cast<float>(zd->Value());
-            xidp.z = 0.0F;
-            xidpp.z = 0.0F;
-            xidppp.z = 0.0F;
-            break;
-        }
+        fill_axis(xd_behavior->CurrentIndex(), xd_val, ax_val, wx_val, bx_val,
+                  xid.x, xidp.x, xidpp.x, xidppp.x);
+        fill_axis(yd_behavior->CurrentIndex(), yd_val, ay_val, wy_val, by_val,
+                  xid.y, xidp.y, xidpp.y, xidppp.y);
+        fill_axis(zd_behavior->CurrentIndex(), zd_val, az_val, wz_val, bz_val,
+                  xid.z, xidp.z, xidpp.z, xidppp.z);
         break;
     
     case 2:
         // trajectory
+        xid = Vector3Df(0,0,0);
+        xidp = Vector3Df(0,0,0);
+        xidpp = Vector3Df(0,0,0);
+        xidppp = Vector3Df(0,0,0);
         break;
     default:
         xid = Vector3Df(0,0,0);
@@ -693,7 +823,7 @@ void ctrl1::sliding_ctrl(Euler &torques){
 
     //Printf("cur: %f ms\n",  (float)tf/1000000);
     
-    Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
+    //Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
     float refAltitude = 0;
     float refVerticalVelocity = 0;
@@ -756,7 +886,7 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
 
     //Printf("ori: %f ms\n",  (float)tf/1000000);
     
-    Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
+    //Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
 
     pos_reference(xid, xidp, xidpp, xidppp, tactual);

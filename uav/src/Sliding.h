@@ -18,6 +18,7 @@
 #include <Vector3D.h>
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include "AC1.h"
 
 namespace flair {
     namespace core {
@@ -29,6 +30,9 @@ namespace flair {
         class DoubleSpinBox;
         class CheckBox;
         class Label;
+    }
+    namespace filter {
+        class AC1;
     }
 }
 
@@ -71,11 +75,15 @@ public:
     void UseDefaultPlot3(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot4(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot5(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot6(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot7(const flair::gui::LayoutPosition *position);
     
     flair::core::Time t0;
 
 private:
     flair::core::Matrix *state;
+
+    AC1 *ac1;
 
     flair::gui::DoubleSpinBox *T, *k1, *k2, *gamma, *alpha, *k, *Kd, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p;
     flair::gui::DoubleSpinBox *alpha_roll, *alpha_pitch, *alpha_yaw;

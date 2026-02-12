@@ -69,10 +69,10 @@ private:
     flair::gui::DoubleSpinBox *kw;
     flair::gui::DoubleSpinBox *k;
     
-    void updateActor(Eigen::Vector3f Sr);
-    void computeReward1(Eigen::Vector3f e, Eigen::Vector3f ep);
-    void computeTD(float NNc);
-    void updateCritic(Eigen::Vector3f e);
+    void updateActor(Eigen::Vector3f& Sr);
+    void computeReward1(Eigen::Vector3f& e, Eigen::Vector3f& ep);
+    void computeTD(float& NNc);
+    void updateCritic(Eigen::Vector3f& e);
     
     // Sigmoid function: s = (1-exp(-x))./(1+exp(-x))
     template<typename Derived>
@@ -85,19 +85,20 @@ private:
         return (1.0 - std::exp(-x)) / (1.0 + std::exp(-x));
     }
 
-    bool saturate(Eigen::Vector3f& vec, float min_val, float max_val) {
+    bool saturate(Eigen::Vector3f& vec, Eigen::Vector3f min_val, Eigen::Vector3f max_val) {
+        bool val = false;
         for (int i = 0; i < vec.size(); ++i) {
-            if (vec(i) > max_val) {
-                vec(i) = max_val;
-                return true;
+            if (vec(i) > max_val(i)) {
+                vec(i) = max_val(i);
+                val = true;
                 //Reset();
-            } if (vec(i) < min_val ) {
-                vec(i) = min_val;
-                return true;
+            } if (vec(i) < min_val(i)) {
+                vec(i) = min_val(i);
+                val = true;
                 //Reset();
             }
         }
-        return false;
+        return val;
     }
 
     void antiWindup(const Eigen::Vector3f& e);

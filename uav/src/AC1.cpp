@@ -28,7 +28,7 @@
 #include <cmath>
 #include <Euler.h>
 #include <Label.h>
-#include <iostream>
+//#include <iostream>
 
 using std::string;
 using namespace flair::core;
@@ -77,6 +77,30 @@ AC1::AC1(const GroupBox *position, string name): ControlLaw(position, name, 3), 
     k = new DoubleSpinBox(critic->LastRowLastCol(), "K", 0, 1000, 0.1, 1);
 
     AddDataToLog(state);
+
+    V_a << 0.6557F, 0.8235F, 0.2760F, 0.9593F, 0.3517F, 0.1299F, 0.4505F, 0.8687F, 0.8530F, 0.4893F,
+            0.0357F, 0.6948F, 0.6797F, 0.5472F, 0.8308F, 0.5688F, 0.0838F, 0.0844F, 0.6221F, 0.3377F,
+            0.8491F, 0.3171F, 0.6551F, 0.1386F, 0.5853F, 0.4694F, 0.2290F, 0.3998F, 0.3510F, 0.9001F,
+            0.45F,   0.734F,  0.187F,  0.93F,   0.89F,   0.827F,  0.632F,  0.934F,  0.327F,  0.194F;
+
+    V_c << 0.8909F, 0.5472F, 0.1493F, 0.8407F, 0.8143F, 0.9293F, 0.1966F, 0.6160F, 0.3517F, 0.5853F,
+            -0.45F,  -0.65F,  -0.154F, -0.953F, -0.343F, -0.794F, -0.154F, -0.934F, -0.315F, -0.765F,
+            0.56F,   0.32F,   0.924F,  0.185F,  0.734F,  0.564F,  0.194F,  0.285F,  0.624F,  0.935F,
+            0.45F,   0.67F,   0.34F,   0.83F,   0.95F,   0.12F,   0.423F,  0.52F,   0.17F,   0.47F;
+
+    W_a << 0.15F, 0.3F, 0.5F,
+            0.34F, 0.85F, 0.67F,
+            0.27F, 0.83F, 0.87F,
+            0.97F, 0.47F, 0.62F,
+            0.74F, 0.38F, 0.31F,
+            0.93F, 0.16F, 0.24F,
+            0.26F, 0.27F, 0.72F,
+            0.05F, 0.42F, 0.69F,
+            0.49F, 0.75F, 0.43F,
+            0.83F, 0.92F, 0.98F;
+    W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
+
+    W_c << 0.1F, 0.23F, 0.54F, 0.98F, 0.464F, 0.176F, 0.584F, 0.045F, 1.0F, 0.2F;
     
 }
 
@@ -91,7 +115,7 @@ void AC1::UseDefaultPlot(const LayoutPosition *position) {
 }
 
 void AC1::UseDefaultPlot2(const LayoutPosition *position) {
-    DataPlot1D *NNc = new DataPlot1D(position, "NNc_"+this->name, -5, 5);
+    DataPlot1D *NNc = new DataPlot1D(position, "NNc_"+this->name, -3, 3);
     NNc->AddCurve(state->Element(0, 1),DataPlot::Red);
     NNc->AddCurve(state->Element(1, 1),DataPlot::Green);
     NNc->AddCurve(state->Element(2, 1),DataPlot::Blue);
@@ -110,15 +134,20 @@ void AC1::Reset() {
     int_s = Eigen::Vector3f::Zero();
     //int_s2 = Eigen::Vector3f::Zero();
 
+    NNa = Eigen::Vector3f::Zero();
+    NNc = 0.0F;
+
     V_a << 0.6557F, 0.8235F, 0.2760F, 0.9593F, 0.3517F, 0.1299F, 0.4505F, 0.8687F, 0.8530F, 0.4893F,
             0.0357F, 0.6948F, 0.6797F, 0.5472F, 0.8308F, 0.5688F, 0.0838F, 0.0844F, 0.6221F, 0.3377F,
             0.8491F, 0.3171F, 0.6551F, 0.1386F, 0.5853F, 0.4694F, 0.2290F, 0.3998F, 0.3510F, 0.9001F,
             0.45F,   0.734F,  0.187F,  0.93F,   0.89F,   0.827F,  0.632F,  0.934F,  0.327F,  0.194F;
+
     V_c << 0.8909F, 0.5472F, 0.1493F, 0.8407F, 0.8143F, 0.9293F, 0.1966F, 0.6160F, 0.3517F, 0.5853F,
             -0.45F,  -0.65F,  -0.154F, -0.953F, -0.343F, -0.794F, -0.154F, -0.934F, -0.315F, -0.765F,
             0.56F,   0.32F,   0.924F,  0.185F,  0.734F,  0.564F,  0.194F,  0.285F,  0.624F,  0.935F,
             0.45F,   0.67F,   0.34F,   0.83F,   0.95F,   0.12F,   0.423F,  0.52F,   0.17F,   0.47F;
-    //V_c *= 10.0F;
+
+    //V_c = V_c * 10.0F; 
 
     W_a << 0.15F, 0.3F, 0.5F,
             0.34F, 0.85F, 0.67F,
@@ -130,14 +159,9 @@ void AC1::Reset() {
             0.05F, 0.42F, 0.69F,
             0.49F, 0.75F, 0.43F,
             0.83F, 0.92F, 0.98F;
-    W_a *= 0.001F;
+    W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
 
     W_c << 0.1F, 0.23F, 0.54F, 0.98F, 0.464F, 0.176F, 0.584F, 0.045F, 1.0F, 0.2F;
-
-    NNa = Eigen::Vector3f::Zero();
-    NNc = 0.0F;
-
-    
     
 
 }
@@ -184,6 +208,12 @@ void AC1::UpdateFrom(const io_data *data) {
         delta_t = 0.0F;
         first_update = false;
     }
+    const float max_dt = 0.1F;
+    if (delta_t < 0.0F) {
+        delta_t = 0.0F;
+    } else if (delta_t > max_dt) {
+        delta_t = max_dt;
+    }
 
     
     computeReward1(e, ep);
@@ -210,94 +240,138 @@ void AC1::UpdateFrom(const io_data *data) {
 }
 
 
-void AC1::updateActor(Eigen::Vector3f Sr) {
+void AC1::updateActor(Eigen::Vector3f& Sr) {
     // Implementation of the actor update logic goes here{
 
     Eigen::Vector4f chi_a;
 
     
-    int_s = rk4_eigen(int_s, Sr, delta_t);
+    int_s = rk4_eigen(int_s, delta_t, [Sr](const Eigen::Vector3f&) { return Sr; });
     //std::cout<<"int_s: " << int_s.transpose() << '\n';
-    //int_s2 = rk4_vec(int_s2, Sr, delta_t);
+    //int_s2 = rk4_vec(int_s2, delta_t, [Sr](const Eigen::Vector3f&) { return Sr; });
     //std::cout<<"int_s2: " << int_s2.transpose() << '\n';
 
 
     chi_a << 1, int_s;
 
-    Eigen::VectorXf sigmoid_Va = sigmoid1(V_a.transpose() * chi_a);
+    Eigen::Matrix<float, 10, 1> sigmoid_Va = sigmoid1(V_a.transpose() * chi_a).matrix();
+    if (!sigmoid_Va.allFinite()) {
+        return;
+    }
 
     //std::cout<<"sigmoid_Va: " << sigmoid_Va.transpose() << '\n';
 
-    Eigen::Matrix<float, 10, 10> Gamma = gamma->Value() * Eigen::Matrix<float,10,10>::Identity();
+    const float gamma_val_local = gamma->Value();
+    const float gr = gamma_val * reward;
+    const float gr2 = gr * gr;
+    Eigen::Matrix<float, 10, 3> Wap = -gamma_val_local * (sigmoid_Va * Sr.transpose())
+        - gamma_val_local * W_a * gr2;
+    
+    
+    if (!Wap.allFinite()) {
+        return; 
+    }
 
-    Eigen::Matrix<float, 10, 3> Wap = -Gamma*sigmoid_Va*Sr.transpose() - Gamma*W_a*(gamma_val*reward)*(gamma_val*reward);
+    Eigen::Matrix<float, 10, 3> W_a_next = rk4_eigen_matrix(W_a, delta_t, [Wap](const Eigen::Matrix<float, 10, 3>&) { return Wap; });
+    if (!W_a_next.allFinite()) {
+        return;
+    }
 
+    Eigen::Vector3f NNa1 = W_a_next.transpose() * sigmoid_Va;
 
-    W_a = rk4_eigen_matrix(W_a, Wap, delta_t);
+    if (!NNa1.allFinite()) {
+        return;
+    }
 
-    NNa = W_a.transpose()*sigmoid_Va;
+    W_a = W_a_next;
+    this->NNa = NNa1;
+
+    //NNa = W_a.transpose()*sigmoid_Va;
 }
 
-void AC1::computeReward1(Eigen::Vector3f e, Eigen::Vector3f ep) {
+void AC1::computeReward1(Eigen::Vector3f &e, Eigen::Vector3f &ep) {
     // Implementation of the reward computation logic goes here
 
-    Eigen::Matrix3f Q = Eigen::Vector3f(0.9,0.9,0.9).asDiagonal();
-    Eigen::Matrix3f R = Eigen::Vector3f(0.1,0.1,0.1).asDiagonal();
+    static const Eigen::Matrix3f Q = Eigen::Vector3f(0.9F,0.9F,0.9F).asDiagonal();
+    static const Eigen::Matrix3f R = Eigen::Vector3f(0.1F,0.1F,0.1F).asDiagonal();
 
     reward = 0.5F * (e.transpose() * Q * e + ep.transpose() * R * ep)(0,0);
 }
 
-void AC1::computeTD(float NNc) {
+void AC1::computeTD(float &NNc) {
     // Implementation of the TD computation logic goes here
 
     float psi = 1000.0F;
 
-    reward_int = rk4(function1d, reward_int, reward, delta_t);
-    NNc_int = rk4(function1d, NNc_int, NNc, delta_t);
+    this->reward_int = rk4(this->reward_int, delta_t, [this](float) { return this->reward; });
+    NNc_int = rk4(NNc_int, delta_t, [NNc](float) { return NNc; });
 
-    gamma_val = NNc + ((1/psi)*NNc_int) + reward_int;
+    gamma_val = NNc + ((1/psi)*NNc_int) + this->reward_int;
     
 }
 
-void AC1::updateCritic(Eigen::Vector3f e) {
+void AC1::updateCritic(Eigen::Vector3f& e) {
     // Implementation of the critic update logic goes here
     float kw_val = kw->Value();
     float K_val = k->Value();
+    const float denom_eps = 1.0e-6F;
 
     Eigen::Vector4f chi_c;
     chi_c << -1, e;
 
-    Eigen::Vector<float, 10> sigmoid_Va = sigmoid1(V_c.transpose() * chi_c);
+    Eigen::Matrix<float, 10, 1> sigmoid_Va = sigmoid1(V_c.transpose() * chi_c).matrix();
+    if (!sigmoid_Va.allFinite()) {
+        return;
+    }
 
-    Eigen::Matrix<float, 10, 1> Wcp = -kw_val*(sigmoid1(W_c)) - K_val*std::tanh(gamma_val*500)*((sigmoid_Va)/(sigmoid_Va.transpose()*sigmoid_Va))(0,0);
+    const float denom = (sigmoid_Va.transpose() * sigmoid_Va)(0,0);
+    if (!std::isfinite(denom) || denom < denom_eps) {
+        return;
+    }
 
-    W_c = rk4_eigen_matrix(W_c,Wcp, delta_t);
+    Eigen::Matrix<float, 10, 1> sigmoid_Wc = sigmoid1(W_c).matrix();
+    if (!sigmoid_Wc.allFinite()) {
+        return;
+    }
 
-    NNc =  (W_c.transpose()*sigmoid_Va)(0,0);
+    const float inv_denom = 1.0F / denom;
+    Eigen::Matrix<float, 10, 1> Wcp = -kw_val * sigmoid_Wc
+        - K_val * std::tanh(gamma_val * 500.0F) * (sigmoid_Va * inv_denom);
+    if (!Wcp.allFinite()) {
+        return;
+    }
 
-    std::cout<<"NNc: " << NNc << '\n';
+    Eigen::Matrix<float, 10, 1> W_c_next = rk4_eigen_matrix(W_c, delta_t, [Wcp](const Eigen::Matrix<float, 10, 1>&) { return Wcp; });
+    if (!W_c_next.allFinite()) {
+        return;
+    }
+
+    float NNc1 =  (W_c_next.transpose() * sigmoid_Va)(0,0);
+    if (!std::isfinite(NNc1)) {
+        return;
+    }
+
+    W_c = W_c_next;
+    this->NNc = NNc1;
+    //std::cout<<"NNc: " << NNc << '\n';
 
 }
 
 
 void AC1::antiWindup(const Eigen::Vector3f& e) {
     // Implementation of the anti-windup logic goes here
-    float min_val = -8.0F;
-    float max_val = 8.0F;
+    // Eigen::Vector3f min_val = Eigen::Vector3f(  -2.0F, -2.0F, -6.0F);
+    // Eigen::Vector3f max_val = Eigen::Vector3f(2.0F, 2.0F, 0.0F);
 
-    if (NNa.hasNaN() || std::isnan(NNc)) {
+
+    if (e.norm()>3.0F) {
         Reset();
         return;
     }
 
-    if (e.norm()>2.0F) {
-        Reset();
-        return;
-    }
-
-    if (saturate(NNa, min_val, max_val) ) {
-        Reset();
-    };
+    // if (saturate(NNa, min_val, max_val) ) {
+    //     //Reset();
+    // };
 
 }
 

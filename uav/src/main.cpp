@@ -39,8 +39,8 @@ void parseOptions(int argc, char **argv);
 int main(int argc, char *argv[]){
 	parseOptions(argc, argv);
 
-	FrameworkManager *manager;
-	manager = new FrameworkManager(name);
+	// *manager;
+	FrameworkManager* manager = new FrameworkManager(name);
 	manager->SetupConnection(address, port ); // (Time)30000000000 30s timeout 
 	manager->SetupUserInterface(xml_file);
 	manager->SetupLogger(log_path);
@@ -53,10 +53,15 @@ int main(int argc, char *argv[]){
 	demo->Start();
 	demo->Join();
 
-	//delete demo;
+	
 	delete controller;
 	//delete drone;
 	delete manager;
+	//demo->SafeStop();
+	
+	//delete demo;
+
+	//return 0;
 }
 
 void parseOptions(int argc, char **argv){
