@@ -104,16 +104,16 @@ void Sliding::Reset(void) {
     sgnori_p << 0,0,0;
     sgnori << 0,0,0;
 
-    state->GetMutex();
-    for (int i = 0; i < 7; ++i) {
-        state->SetValueNoMutex(i, 0, 0.0F);
-    }
-    state->ReleaseMutex();
+    // state->GetMutex();
+    // for (int i = 0; i < 7; ++i) {
+    //     state->SetValueNoMutex(i, 0, 0.0F);
+    // }
+    // state->ReleaseMutex();
 
-    output->SetValue(0, 0, 0.0F);
-    output->SetValue(1, 0, 0.0F);
-    output->SetValue(2, 0, 0.0F);
-    output->SetValue(3, 0, 0.0F);
+    // output->SetValue(0, 0, 0.0F);
+    // output->SetValue(1, 0, 0.0F);
+    // output->SetValue(2, 0, 0.0F);
+    // output->SetValue(3, 0, 0.0F);
 
 //    pimpl_->i = 0;
 //    pimpl_->first_update = true;
@@ -176,8 +176,8 @@ void Sliding::UseDefaultPlot5(const LayoutPosition *position) {
 
 void Sliding::UpdateFrom(const io_data *data) {
     constexpr float kEps = 1e-6f;
-    const Time now = GetTime();
-    float tactual=(double(now)/1000000000)-t0;
+    //const Time now = GetTime();
+    double tactual=(double(GetTime())/1000000000)-t0;
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
 
     //printf("control\n");
@@ -192,9 +192,9 @@ void Sliding::UpdateFrom(const io_data *data) {
         delta_t = 0;
         //first_update = false;
     }
-    if (delta_t < 0.0F) {
-        delta_t = 0.0F;
-    }
+    // if (delta_t < 0.0F) {
+    //     delta_t = 0.0F;
+    // }
     
     const Matrix* input = dynamic_cast<const Matrix*>(data);
   
@@ -255,12 +255,12 @@ void Sliding::UpdateFrom(const io_data *data) {
     //Eigen::Vector3f Kdv(Kd_roll->Value(), Kd_pitch->Value(), Kd_yaw->Value());
     const Eigen::Vector3f Kdv(Kd_roll_v, Kd_pitch_v, Kd_yaw_v);
 
-    if (q.norm() > kEps) {
-        q.normalize();
-    }
-    if (qd.norm() > kEps) {
-        qd.normalize();
-    }
+    // if (q.norm() > kEps) {
+    //     q.normalize();
+    // }
+    // if (qd.norm() > kEps) {
+    //     qd.normalize();
+    // }
     const Eigen::Quaternionf qd_conj = qd.conjugate();
     Eigen::Quaternionf qe = q * qd_conj;
 
@@ -284,7 +284,7 @@ void Sliding::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nuq = nu-nud;
 
     sgnori_p = signth(nuq,p_val);
-    sgnori = rk4_vec(sgnori, delta_t, [this](const Eigen::Vector3f&) { return this->sgnori_p; });
+    sgnori = rk4_eigen(sgnori_p, delta_t, sgnori_p);
 
     Eigen::Vector3f nur = nuq + gammao_v.cwiseProduct(sgnori);
 

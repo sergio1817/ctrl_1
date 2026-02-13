@@ -153,16 +153,16 @@ void Sliding_pos::Reset(void) {
     //levant.Reset();
     levant3.Reset();
 
-    state->GetMutex();
-    for (int i = 0; i < 26; ++i) {
-        state->SetValueNoMutex(i, 0, 0.0F);
-    }
-    state->ReleaseMutex();
+    // state->GetMutex();
+    // for (int i = 0; i < 26; ++i) {
+    //     state->SetValueNoMutex(i, 0, 0.0F);
+    // }
+    // state->ReleaseMutex();
 
-    output->SetValue(0, 0, 0.0F);
-    output->SetValue(1, 0, 0.0F);
-    output->SetValue(2, 0, 0.0F);
-    output->SetValue(3, 0, 0.0F);
+    // output->SetValue(0, 0, 0.0F);
+    // output->SetValue(1, 0, 0.0F);
+    // output->SetValue(2, 0, 0.0F);
+    // output->SetValue(3, 0, 0.0F);
 
     // sgnpos2 = Vector3ff(0,0,0);
     // sgn2 = Vector3ff(0,0,0);
@@ -334,7 +334,7 @@ void Sliding_pos::UseDefaultPlot15(const LayoutPosition *position) {
 
 void Sliding_pos::UpdateFrom(const io_data *data) {
     constexpr float kEps = 1e-6f;
-    const Time now = GetTime();
+    //const Time now = GetTime();
     float tactual=(double(GetTime())/1000000000)-t0;
     //Printf("tactual: %f\n",tactual);
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
@@ -383,9 +383,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         delta_t = 0.0F;
         //first_update = false;
     }
-    if (delta_t < 0.0F) {
-        delta_t = 0.0F;
-    }
+    // if (delta_t < 0.0F) {
+    //     delta_t = 0.0F;
+    // }
 
     const Matrix* input = dynamic_cast<const Matrix*>(data);
   
@@ -411,9 +411,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     input->ReleaseMutex();
 
 
-    if (q.norm() > kEps) {
-        q.normalize();
-    }
+    // if (q.norm() > kEps) {
+    //     q.normalize();
+    // }
 
     //flair::core::Time t0_p = GetTime();
 
@@ -428,7 +428,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nup = nup1 - nupd;
 
     sgnpos_p = signth(nup,p1);
-    sgnpos = rk4_vec(sgnpos, delta_t, [this](const Eigen::Vector3f&) { return this->sgnpos_p; });
+    sgnpos = rk4_eigen(sgnpos_p,delta_t,sgnpos_p);
 
     Eigen::Vector3f nurp = nup + gammap_v.cwiseProduct(sgnpos);
 
@@ -593,7 +593,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nuq = nu-nud;
 
     sgnori_p = signth(nuq,p_val);
-    sgnori = rk4_vec(sgnori, delta_t, [this](const Eigen::Vector3f&) { return this->sgnori_p; });
+    sgnori = rk4_eigen(sgnori_p,delta_t,sgnori_p);
 
     Eigen::Vector3f nur = nuq + gammao_v.cwiseProduct(sgnori);
 

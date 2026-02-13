@@ -138,8 +138,8 @@ Eigen::Vector3f Levant_diff::Compute(const Eigen::Vector3f f, const float dt){
     u1p_vec(1) = -alpha_vec(1)*sign_(x_vec(1)-f(1));
     u1p_vec(2) = -alpha_vec(2)*sign_(x_vec(2)-f(2));
 
-    x_vec = rk4_vec(x_vec,dt, [this](const Eigen::Vector3f&) { return this->u_vec; });
-    u1_vec = rk4_vec(u1_vec, dt, [this](const Eigen::Vector3f&) { return this->u1p_vec; });
+    x_vec = rk4_const(x_vec, dt, u_vec); 
+    u1_vec = rk4_const(u1_vec, dt, u1p_vec);
 
     err_v = x_vec-f;
     return u_vec;
@@ -230,10 +230,10 @@ double Levant3::compute(double& f, float dt) {
     const double nu2_local = (-8.0 * L_p12 * e2_1_2 * sign_(e2_local)) + z3;
     const double z3p_local = -1.1 * L * sign_(z3 - nu2_local);
 
-    z0 = rk4(z0, static_cast<double>(dt), [nu0_local](double) { return nu0_local; });
-    z1 = rk4(z1, static_cast<double>(dt), [nu1_local](double) { return nu1_local; });
-    z2 = rk4(z2, static_cast<double>(dt), [nu2_local](double) { return nu2_local; });
-    z3 = rk4(z3, static_cast<double>(dt), [z3p_local](double) { return z3p_local; });
+    z0 = rk4_eigen(z0, dt, nu0_local);
+    z1 = rk4_eigen(z1, dt, nu1_local);
+    z2 = rk4_eigen(z2, dt, nu2_local);
+    z3 = rk4_eigen(z3, dt, z3p_local);
 
     //fp = nu0;
     //fp = nu0; // Compute the first derivative (velocity)
@@ -263,10 +263,10 @@ Eigen::Vector3f Levant3::compute(const Eigen::Vector3f& f, float dt) {
         z3p(i) = -1.1F * static_cast<float>(L) * static_cast<float>(sign_(z3_1(i) - nu2(i)));
     }
 
-    z0_1 = rk4_vec(z0_1, dt, [this](const Eigen::Vector3f&) { return this->nu0; });
-    z1_1 = rk4_vec(z1_1, dt, [this](const Eigen::Vector3f&) { return this->nu1; });
-    z2_1 = rk4_vec(z2_1, dt, [this](const Eigen::Vector3f&) { return this->nu2; });
-    z3_1 = rk4_vec(z3_1, dt, [this](const Eigen::Vector3f&) { return this->z3p; });
+    z0_1 = rk4_eigen(z0_1, dt, nu0);
+    z1_1 = rk4_eigen(z1_1, dt, nu1);
+    z2_1 = rk4_eigen(z2_1, dt, nu2);
+    z3_1 = rk4_eigen(z3_1, dt, z3p);
 
     
 
