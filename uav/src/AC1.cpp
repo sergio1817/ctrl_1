@@ -142,6 +142,8 @@ void AC1::Reset() {
             0.8491F, 0.3171F, 0.6551F, 0.1386F, 0.5853F, 0.4694F, 0.2290F, 0.3998F, 0.3510F, 0.9001F,
             0.45F,   0.734F,  0.187F,  0.93F,   0.89F,   0.827F,  0.632F,  0.934F,  0.327F,  0.194F;
 
+    //V_a = V_a * 10.0F; // Scale up the initial weights for better learning signal
+
     V_c << 0.8909F, 0.5472F, 0.1493F, 0.8407F, 0.8143F, 0.9293F, 0.1966F, 0.6160F, 0.3517F, 0.5853F,
             -0.45F,  -0.65F,  -0.154F, -0.953F, -0.343F, -0.794F, -0.154F, -0.934F, -0.315F, -0.765F,
             0.56F,   0.32F,   0.924F,  0.185F,  0.734F,  0.564F,  0.194F,  0.285F,  0.624F,  0.935F,
@@ -159,9 +161,20 @@ void AC1::Reset() {
             0.05F, 0.42F, 0.69F,
             0.49F, 0.75F, 0.43F,
             0.83F, 0.92F, 0.98F;
-    W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
+    //W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
 
     W_c << 0.1F, 0.23F, 0.54F, 0.98F, 0.464F, 0.176F, 0.584F, 0.045F, 1.0F, 0.2F;
+
+    state->GetMutex();
+    for (int i = 0; i < 3; ++i) {
+        state->SetValueNoMutex(i, 0, 0.0F);
+        state->SetValueNoMutex(i, 1, 0.0F);
+    }
+    state->ReleaseMutex();
+
+    output->SetValue(0, 0, 0);
+    output->SetValue(1, 0, 0);
+    output->SetValue(2, 0, 0);
     
 
 }
@@ -202,25 +215,25 @@ void AC1::UpdateFrom(const io_data *data) {
     
     input->ReleaseMutex();
 
-    this->delta_t = (float)(data->DataDeltaTime()) / 1000000000.0F;
+    this->delta_t = (double)(data->DataDeltaTime()) / 1000000000.0F;
 
     if (first_update) {
         delta_t = 0.0F;
         first_update = false;
     }
-    const float max_dt = 0.1F;
-    if (delta_t < 0.0F) {
-        delta_t = 0.0F;
-    } else if (delta_t > max_dt) {
-        delta_t = max_dt;
-    }
+    // const float max_dt = 0.1F;
+    // if (delta_t < 0.0F) {
+    //     delta_t = 0.0F;
+    // } else if (delta_t > max_dt) {
+    //     delta_t = max_dt;
+    // }
 
     
     computeReward1(e, ep);
     computeTD(NNc);
     updateCritic(e);
     updateActor(Sr);
-    antiWindup(e);
+    //antiWindup(e);
 
     state->GetMutex();
     state->SetValue(0, 0, NNa(0));
@@ -240,13 +253,13 @@ void AC1::UpdateFrom(const io_data *data) {
 }
 
 
-void AC1::updateActor(Eigen::Vector3f& Sr) {
+void AC1::updateActor(const Eigen::Vector3f& Sr) {
     // Implementation of the actor update logic goes here{
 
     Eigen::Vector4f chi_a;
 
     
-    int_s = rk4_eigen(int_s, delta_t, [Sr](const Eigen::Vector3f&) { return Sr; });
+    int_s = rk4_const(int_s, delta_t, Sr);
     //std::cout<<"int_s: " << int_s.transpose() << '\n';
     //int_s2 = rk4_vec(int_s2, delta_t, [Sr](const Eigen::Vector3f&) { return Sr; });
     //std::cout<<"int_s2: " << int_s2.transpose() << '\n';
@@ -264,20 +277,21 @@ void AC1::updateActor(Eigen::Vector3f& Sr) {
     const float gamma_val_local = gamma->Value();
     const float gr = gamma_val * reward;
     const float gr2 = gr * gr;
-    Eigen::Matrix<float, 10, 3> Wap = -gamma_val_local * (sigmoid_Va * Sr.transpose())
-        - gamma_val_local * W_a * gr2;
+    Eigen::Matrix<float, 10, 3> Wap = -gamma_val_local * (sigmoid_Va * Sr.transpose()) - gamma_val_local * W_a * gr2;
     
     
     if (!Wap.allFinite()) {
         return; 
     }
 
-    Eigen::Matrix<float, 10, 3> W_a_next = rk4_eigen_matrix(W_a, delta_t, [Wap](const Eigen::Matrix<float, 10, 3>&) { return Wap; });
+    Eigen::Matrix<float, 10, 3> W_a_next = rk4_const(W_a, delta_t, Wap);
+    //W_a = rk4_const(W_a, delta_t, Wap);
     if (!W_a_next.allFinite()) {
         return;
     }
 
     Eigen::Vector3f NNa1 = W_a_next.transpose() * sigmoid_Va;
+    //Eigen::Vector3f NNa1 = W_a.transpose() * sigmoid_Va;
 
     if (!NNa1.allFinite()) {
         return;
@@ -289,7 +303,7 @@ void AC1::updateActor(Eigen::Vector3f& Sr) {
     //NNa = W_a.transpose()*sigmoid_Va;
 }
 
-void AC1::computeReward1(Eigen::Vector3f &e, Eigen::Vector3f &ep) {
+void AC1::computeReward1(const Eigen::Vector3f& e, const Eigen::Vector3f& ep) {
     // Implementation of the reward computation logic goes here
 
     static const Eigen::Matrix3f Q = Eigen::Vector3f(0.9F,0.9F,0.9F).asDiagonal();
@@ -298,19 +312,19 @@ void AC1::computeReward1(Eigen::Vector3f &e, Eigen::Vector3f &ep) {
     reward = 0.5F * (e.transpose() * Q * e + ep.transpose() * R * ep)(0,0);
 }
 
-void AC1::computeTD(float &NNc) {
+void AC1::computeTD(const float& NNc) {
     // Implementation of the TD computation logic goes here
 
     float psi = 1000.0F;
 
-    this->reward_int = rk4(this->reward_int, delta_t, [this](float) { return this->reward; });
-    NNc_int = rk4(NNc_int, delta_t, [NNc](float) { return NNc; });
+    this->reward_int = rk4_const(this->reward_int, delta_t, reward);
+    NNc_int = rk4_const(NNc_int, delta_t, NNc);
 
     gamma_val = NNc + ((1/psi)*NNc_int) + this->reward_int;
     
 }
 
-void AC1::updateCritic(Eigen::Vector3f& e) {
+void AC1::updateCritic(const Eigen::Vector3f& e) {
     // Implementation of the critic update logic goes here
     float kw_val = kw->Value();
     float K_val = k->Value();
@@ -335,18 +349,19 @@ void AC1::updateCritic(Eigen::Vector3f& e) {
     }
 
     const float inv_denom = 1.0F / denom;
-    Eigen::Matrix<float, 10, 1> Wcp = -kw_val * sigmoid_Wc
-        - K_val * std::tanh(gamma_val * 500.0F) * (sigmoid_Va * inv_denom);
+    Eigen::Matrix<float, 10, 1> Wcp = -kw_val * sigmoid_Wc - K_val * sigmoid11(gamma_val) * (sigmoid_Va * inv_denom);
     if (!Wcp.allFinite()) {
         return;
     }
 
-    Eigen::Matrix<float, 10, 1> W_c_next = rk4_eigen_matrix(W_c, delta_t, [Wcp](const Eigen::Matrix<float, 10, 1>&) { return Wcp; });
+    //W_c = rk4_const(W_c, delta_t, Wcp);
+    Eigen::Matrix<float, 10, 1> W_c_next = rk4_const(W_c, delta_t, Wcp);
     if (!W_c_next.allFinite()) {
         return;
     }
 
     float NNc1 =  (W_c_next.transpose() * sigmoid_Va)(0,0);
+    //float NNc1 =  (W_c.transpose() * sigmoid_Va)(0,0);
     if (!std::isfinite(NNc1)) {
         return;
     }
@@ -360,11 +375,11 @@ void AC1::updateCritic(Eigen::Vector3f& e) {
 
 void AC1::antiWindup(const Eigen::Vector3f& e) {
     // Implementation of the anti-windup logic goes here
-    // Eigen::Vector3f min_val = Eigen::Vector3f(  -2.0F, -2.0F, -6.0F);
-    // Eigen::Vector3f max_val = Eigen::Vector3f(2.0F, 2.0F, 0.0F);
+    Eigen::Vector3f min_val = Eigen::Vector3f(  -2.0F, -2.0F, -6.0F);
+    Eigen::Vector3f max_val = Eigen::Vector3f(2.0F, 2.0F, 6.0F);
 
 
-    if (e.norm()>3.0F) {
+    if (e.norm()>2.0F) {
         Reset();
         return;
     }

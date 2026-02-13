@@ -93,7 +93,7 @@ public:
 
     
     
-    flair::core::Time t0;
+    double t0;
 
 private:
     flair::core::Matrix *state;
@@ -115,7 +115,11 @@ private:
     
     float Sat(float value, float borne);
     
-    float delta_t;
+    double delta_t;
+    flair::core::Time now;
+    flair::core::Time dt1;
+
+    float dum;
     
     bool first_update;
     

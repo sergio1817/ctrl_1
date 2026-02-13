@@ -296,7 +296,7 @@ void Sliding::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nuq = nu-nud;
 
     sgnori_p = signth(nuq,p_val);
-    sgnori = rk4_vec(sgnori, delta_t, [this](const Eigen::Vector3f&) { return this->sgnori_p; });
+    sgnori = rk4_const(sgnori, delta_t, sgnori_p);
 
     Eigen::Vector3f nur = nuq + gammao_v.cwiseProduct(sgnori);
 
@@ -304,7 +304,11 @@ void Sliding::UpdateFrom(const io_data *data) {
     ac1->Update(now);
     Eigen::Vector3f NNa = Eigen::Vector3f(ac1->Output(0), ac1->Output(1), ac1->Output(2));
 
-    Eigen::Vector3f tau = -Kdv.cwiseProduct(nur) + NNa;
+    saturate(NNa, Eigen::Vector3f(-1,-1,-1), Eigen::Vector3f(1,1,1));
+
+    Eigen::Vector3f tau = -Kdv.cwiseProduct(nur);
+
+    saturate(tau, Eigen::Vector3f(-1,-1,-1), Eigen::Vector3f(1,1,1));
 
     //flair::core::Time dt_ori = GetTime() - t0_o;
 

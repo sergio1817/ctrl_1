@@ -853,7 +853,7 @@ void ctrl1::sliding_ctrl(Euler &torques){
 }
 
 void ctrl1::sliding_ctrl_pos(Euler &torques){
-    float tactual=(double(GetTime())/1000000000)-(u_sliding_pos->t0);
+    double tactual=(double(GetTime())/1000000000)-(u_sliding_pos->t0);
     //Printf("t: %f\n",tactual);
     Vector3Df xid;
     Vector3Df xidp;

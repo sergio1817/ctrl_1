@@ -17,6 +17,7 @@
 #include "Sliding_pos.h"
 #include "NMethods.h"
 //#include "AC1.h"
+#include <Eigen/src/Core/Matrix.h>
 #include <Matrix.h>
 #include <Object.h>
 #include <Thread.h>
@@ -30,6 +31,7 @@
 #include <GroupBox.h>
 #include <DoubleSpinBox.h>
 #include <DataPlot1D.h>
+#include <algorithm>
 #include <cmath>
 #include <Euler.h>
 #include <Label.h>
@@ -162,7 +164,7 @@ Sliding_pos::~Sliding_pos(void) {
 
 void Sliding_pos::Reset(void) {
     first_update = true;
-    t0 = 0;
+    //t0 = 0;
     t0 = double(GetTime())/1000000000;
     sgnori_p = Eigen::Vector3f::Zero();
     sgnori = Eigen::Vector3f::Zero();
@@ -173,6 +175,8 @@ void Sliding_pos::Reset(void) {
     levant3.Reset();
     ac1->Reset();
     ac2->Reset();
+
+    dum = 0.0F;
 
     state->GetMutex();
     for (int i = 0; i < 26; ++i) {
@@ -388,8 +392,8 @@ void Sliding_pos::UseDefaultPlot17(const LayoutPosition *position) {
 
 void Sliding_pos::UpdateFrom(const io_data *data) {
     constexpr float kEps = 1e-6f;
-    const Time now = GetTime();
-    float tactual=(double(GetTime())/1000000000)-t0;
+    
+    double tactual=(double(GetTime())/1000000000)-t0;
     //Printf("tactual: %f\n",tactual);
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
     const Eigen::Vector3f ez = Eigen::Vector3f::UnitZ();
@@ -428,18 +432,20 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     const Eigen::Vector3f Kdv(Kd_roll_v, Kd_pitch_v, Kd_yaw_v);
 
     if (T->Value() == 0) {
-        delta_t = (float)(data->DataDeltaTime()) / 1000000000.0F;
+        data->GetDataTime(now, dt1);
+        //delta_t = (double)(data->DataDeltaTime()) / 1000000000.0F;
+        delta_t = (double)(dt1) / 1000000000.0F;
     } else {
+        data->GetDataTime(now, dt1);
         delta_t = T->Value();
     }
+    Printf("delta_t: %f\n",delta_t);
     
     if (first_update) {
         delta_t = 0.0F;
         //first_update = false;
     }
-    if (delta_t < 0.0F) {
-        delta_t = 0.0F;
-    }
+    //delta_t = std::max<double>(delta_t, 0.0F);
 
     const Matrix* input = dynamic_cast<const Matrix*>(data);
   
@@ -477,27 +483,36 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         nup_t0 = nup1;
     }
 
-    Eigen::Vector3f nupd = 0*nup_t0*exp(-k_val*(tactual));
+    Eigen::Vector3f nupd = nup_t0*exp(-k_val*(tactual));
 
     Eigen::Vector3f nup = nup1 - nupd;
 
     sgnpos_p = signth(nup,p1);
-    sgnpos = rk4_vec(sgnpos, delta_t, [this](const Eigen::Vector3f&) { return this->sgnpos_p; });
+    //sgnpos_p = Eigen::Vector3f(std::cos(tactual),0,0);
+    sgnpos = rk4_const(sgnpos, delta_t, sgnpos_p);
+    //sgnpos = rk4_eigen(sgnpos, delta_t, sgnpos_p);
+    //dum = rk4o(function1d, dum, sgnpos_p(0), delta_t);
+    //dum = rk4_const(dum, delta_t, sgnpos_p(0));
+    //sgnpos(2) = dum;
+
+
 
     Eigen::Vector3f nurp = nup + gammap_v.cwiseProduct(sgnpos);
 
     Eigen::Vector3f xirpp = xidpp - alphap_v.cwiseProduct(xiep) - gammap_v.cwiseProduct(sgnpos_p);
 
     ac2->SetValues(xie, xiep, nurp);
-    ac2->Update(GetTime());
+    ac2->Update(now);
     Eigen::Vector3f NNap = Eigen::Vector3f(ac2->Output(0), ac2->Output(1), ac2->Output(2));
 
     //std::cout<<"NNap: " << NNap.transpose() << '\n';
 
+    saturate(NNap, Eigen::Vector3f(-1,-1,-6), Eigen::Vector3f(1,1,0));
+
     Eigen::Vector3f uc = -Kpv.cwiseProduct(nurp);
     Eigen::Vector3f u = uc + NNap; //- m->Value()*g->Value()*ez + m->Value()*xirpp
 
-    saturate(u, Eigen::Vector3f(-0.8,-0.8,-6), Eigen::Vector3f(0.8,0.8,0));
+    saturate(u, Eigen::Vector3f(-1,-1,-6), Eigen::Vector3f(1,1,0));
 
     //std::cout<<"u: " << u.transpose() << '\n';
 
@@ -650,20 +665,22 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nuq = nu-nud;
 
     sgnori_p = signth(nuq,p_val);
-    sgnori = rk4_vec(sgnori, delta_t, [this](const Eigen::Vector3f&) { return this->sgnori_p; });
+    sgnori = rk4_const(sgnori, delta_t, sgnori_p);
 
     Eigen::Vector3f nur = nuq + gammao_v.cwiseProduct(sgnori);
 
     ac1->SetValues(QdTqe3, we, nur);
-    ac1->Update(GetTime());
+    ac1->Update(now);
     Eigen::Vector3f NNa = Eigen::Vector3f(ac1->Output(0), ac1->Output(1), ac1->Output(2));
+
+    saturate(NNa, Eigen::Vector3f(-0.5,-0.5,-0.8), Eigen::Vector3f(0.5,0.5,0.8));
     
     //std::cout<<"NNa: " << NNa.transpose() << '\n';
 
     Eigen::Vector3f tauc = -Kdv.cwiseProduct(nur);
     Eigen::Vector3f tau = tauc + NNa; // + NNa;
 
-    //saturate(tau, Eigen::Vector3f(-0.5,-0.5,-0.8), Eigen::Vector3f(0.5,0.5,0.8));
+    saturate(tau, Eigen::Vector3f(-0.5,-0.5,-0.8), Eigen::Vector3f(0.5,0.5,0.8));
 
     //std::cout<<"tau: " << tau.transpose() << std::endl;
 

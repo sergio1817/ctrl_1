@@ -100,6 +100,13 @@ private:
     
     Eigen::Vector3f sgnori_p, sgnori;
     Eigen::Vector3f nu_t0;
+
+    static void saturate(Eigen::Vector3f& vec, Eigen::Vector3f min_val, Eigen::Vector3f max_val) {
+        for (int i = 0; i < vec.size(); ++i) {
+            vec(i) = std::min(vec(i), max_val(i)); 
+            vec(i) = std::max(vec(i), min_val(i));
+        }
+    }
     
     
 };

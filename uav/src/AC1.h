@@ -69,10 +69,10 @@ private:
     flair::gui::DoubleSpinBox *kw;
     flair::gui::DoubleSpinBox *k;
     
-    void updateActor(Eigen::Vector3f& Sr);
-    void computeReward1(Eigen::Vector3f& e, Eigen::Vector3f& ep);
-    void computeTD(float& NNc);
-    void updateCritic(Eigen::Vector3f& e);
+    void updateActor(const Eigen::Vector3f& Sr);
+    void computeReward1(const Eigen::Vector3f& e, const Eigen::Vector3f& ep);
+    void computeTD(const float& NNc);
+    void updateCritic(const Eigen::Vector3f& e);
     
     // Sigmoid function: s = (1-exp(-x))./(1+exp(-x))
     template<typename Derived>
@@ -118,7 +118,7 @@ private:
 
     float NNc_int = 0.0F;
 
-    float delta_t = 0.0F;
+    double delta_t = 0.0F;
 
     float NNc = 0.0F;
 

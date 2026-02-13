@@ -18,6 +18,24 @@
 
 
 /*!
+  * \brief 4 order Runge-Kutta integration method.
+  *
+  * Compute the integral of a function using the Runge-Kutta method of 4th order.
+  *
+  * \param fPtr Pointer to the function to integrate
+  * \param iC   Integral of the function
+  * \param iCdt Derivative of the integral of the function
+  * \param dt   Time step
+  * 
+  * \return Integral of the function
+  */
+float rk4o(float(*fPtr)(float),  float iC, const float iCdt, const float dt);
+
+/*! \fn function1d.
+ */
+float function1d(float iCdt);
+
+/*!
   * \brief 4th order Runge-Kutta integration for scalar state with non-linear dynamics.
   *
   * \tparam DerivFunc Function type that computes derivative: float f(float x)
@@ -28,18 +46,35 @@
   *
   * \return Next state after integration
   */
-template<typename Scalar, typename DerivFunc, typename = typename std::enable_if<std::is_floating_point<Scalar>::value>::type>
-Scalar rk4(Scalar x, Scalar dt, DerivFunc derivative) {
-  if (!std::isfinite(dt) || dt <= static_cast<Scalar>(0)) {
-    return x;
-  }
-  const Scalar half_dt = static_cast<Scalar>(0.5) * dt;
-  const Scalar k1 = derivative(x);
-  const Scalar k2 = derivative(x + half_dt * k1);
-  const Scalar k3 = derivative(x + half_dt * k2);
-  const Scalar k4 = derivative(x + dt * k3);
-  return x + (dt / static_cast<Scalar>(6.0)) * (k1 + static_cast<Scalar>(2.0) * k2 + static_cast<Scalar>(2.0) * k3 + k4);
+template<typename Scalar, typename = typename std::enable_if<std::is_floating_point<Scalar>::value>::type>
+Scalar rk4(Scalar x, double dt, Scalar xp) {
+  auto derivative_fnc = [](const Scalar d) { return d; };
+  // if (!std::isfinite(dt) || dt <= static_cast<Scalar>(0)) {
+  //   return x;
+  // }
+  //const Scalar half_dt = static_cast<Scalar>(0.5) * dt;
+  const Scalar k1 = dt * derivative_fnc(xp);
+  const Scalar k2 = dt * derivative_fnc(xp + (0.5F * k1));
+  const Scalar k3 = dt * derivative_fnc(xp + (0.5F * k2));
+  const Scalar k4 = dt * derivative_fnc(xp + k3);
+  return x + ((k1 + k4)/6.0F) + ((k2 + k3)/3.0F);
 }
+
+/*
+ * Safer RK4 overload: integrate x' = f(x) with an explicit derivative function.
+ */
+// template<typename Scalar, typename DerivFunc,
+//          typename = typename std::enable_if<std::is_floating_point<Scalar>::value>::type>
+// Scalar rk4(Scalar x, double dt, DerivFunc derivative_fnc) {
+//   if (!std::isfinite(dt) || dt <= 0) {
+//     return x;
+//   }
+//   const Scalar k1 = dt * derivative_fnc(x);
+//   const Scalar k2 = dt * derivative_fnc(x + ((0.5) * k1));
+//   const Scalar k3 = dt * derivative_fnc(x + ((0.5) * k2));
+//   const Scalar k4 = dt * derivative_fnc(x + k3);
+//   return x + ((k1 + k4) / static_cast<Scalar>(6.0)) + ((k2 + k3) / static_cast<Scalar>(3.0));
+// }
 
 
 /*!
@@ -54,18 +89,34 @@ Scalar rk4(Scalar x, Scalar dt, DerivFunc derivative) {
   *
   * \return Next state after integration
   */
-template<typename VectorType, typename DerivFunc>
-VectorType rk4_eigen(const VectorType& x, float dt, DerivFunc derivative) {
-    if (!std::isfinite(dt) || dt <= 0.0F) {
-        return x;
-    }
-    const float half_dt = 0.5F * dt;
-    const VectorType k1 = derivative(x);
-    const VectorType k2 = derivative(x + half_dt * k1);
-    const VectorType k3 = derivative(x + half_dt * k2);
-    const VectorType k4 = derivative(x + dt * k3);
-    return x + (dt / 6.0F) * (k1 + 2.0F * k2 + 2.0F * k3 + k4);
+template<typename VectorType>
+VectorType rk4_eigen(const VectorType& x, double dt, const VectorType& xp) {
+  auto derivative_fnc = [](const VectorType& d) { return d; };
+    // if (!std::isfinite(dt) || dt <= 0.0F) {
+    //     return x;
+    // }
+    //const float half_dt = 0.5F * dt;
+    const VectorType k1 = dt * derivative_fnc(xp);
+    const VectorType k2 = dt * derivative_fnc(xp + (0.5F * k1));
+    const VectorType k3 = dt * derivative_fnc(xp + (0.5F * k2));
+    const VectorType k4 = dt * derivative_fnc(xp + k3);
+    return x + ((k1 + k4)/6.0F) + ((k2 + k3)/3.0F);
 }
+
+/*
+ * Safer RK4 overload: integrate x' = f(x) for Eigen types.
+ */
+// template<typename VectorType, typename DerivFunc>
+// VectorType rk4_eigen(const VectorType& x, double dt, DerivFunc derivative_fnc) {
+//   // if (!std::isfinite(dt) || dt <= 0.0F) {
+//   //   return x;
+//   // }
+//   const VectorType k1 = dt * derivative_fnc(x);
+//   const VectorType k2 = dt * derivative_fnc(x + (0.5F * k1));
+//   const VectorType k3 = dt * derivative_fnc(x + (0.5F * k2));
+//   const VectorType k4 = dt * derivative_fnc(x + k3);
+//   return x + ((k1 + k4) / 6.0F) + ((k2 + k3) / 3.0F);
+// }
 
 /*!
   * \brief 4th order Runge-Kutta integration for general Eigen matrices with non-linear dynamics.
@@ -82,17 +133,18 @@ VectorType rk4_eigen(const VectorType& x, float dt, DerivFunc derivative) {
   *
   * \return Next state after integration
   */
-template<typename MatrixType, typename DerivFunc>
-MatrixType rk4_eigen_matrix(const MatrixType& X, float dt, DerivFunc derivative) {
-  if (!std::isfinite(dt) || dt <= 0.0F) {
-    return X;
-  }
-  const float half_dt = 0.5F * dt;
-  const MatrixType k1 = derivative(X);
-  const MatrixType k2 = derivative(X + half_dt * k1);
-  const MatrixType k3 = derivative(X + half_dt * k2);
-  const MatrixType k4 = derivative(X + dt * k3);
-  return X + (dt / 6.0F) * (k1 + 2.0F * k2 + 2.0F * k3 + k4);
+template<typename MatrixType>
+MatrixType rk4_eigen_matrix(const MatrixType& X, double dt, const MatrixType& Xp) {
+  auto derivative_fnc = [](const MatrixType& d) { return d; };
+  // if (!std::isfinite(dt) || dt <= 0.0F) {
+  //   return X;
+  // }
+  //const float half_dt = 0.5F * dt;
+  const MatrixType k1 = dt * derivative_fnc(Xp);
+  const MatrixType k2 = dt * derivative_fnc(Xp + (0.5F * k1));
+  const MatrixType k3 = dt * derivative_fnc(Xp + (0.5F * k2));
+  const MatrixType k4 = dt * derivative_fnc(Xp + k3);
+  return X + ((k1 + k4)/6.0F) + ((k2 + k3)/3.0F);
 }
 
 /*!
@@ -106,14 +158,21 @@ MatrixType rk4_eigen_matrix(const MatrixType& X, float dt, DerivFunc derivative)
   *
   * \return Next state after integration
   */
-template<typename DerivFunc>
-Eigen::Vector3f rk4_vec(const Eigen::Vector3f& x, float dt, DerivFunc derivative) {
-  return rk4_eigen(x, dt, derivative);
-}
+// template<typename DerivFunc>
+// Eigen::Vector3f rk4_vec(const Eigen::Vector3f& x, float dt, DerivFunc derivative) {
+//   return rk4_eigen(x, dt, derivative);
+// }
 
-// Optional constant-derivative shortcut (uncomment if you want it).
-// inline float rk4_const(float x, float dt, float dx) { return x + dt * dx; }
-// inline Eigen::Vector3f rk4_const(const Eigen::Vector3f& x, float dt, const Eigen::Vector3f& dx) { return x + dt * dx; }
+//Optional constant-derivative shortcut (uncomment if you want it).
+inline float rk4_const(float x, double dt, float dx) { return x + dt * dx; }
+inline Eigen::Vector3f rk4_const(const Eigen::Vector3f& x, double dt, const Eigen::Vector3f& dx) { return x + dt * dx; }
+
+template<typename Derived>
+typename Derived::PlainObject rk4_const(const Eigen::MatrixBase<Derived>& x,
+                                        double dt,
+                                        const Eigen::MatrixBase<Derived>& dx) {
+  return x + (dt * dx);
+}
 
 
 
