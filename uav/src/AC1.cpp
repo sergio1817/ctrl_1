@@ -98,7 +98,7 @@ AC1::AC1(const GroupBox *position, string name): ControlLaw(position, name, 3), 
             0.05F, 0.42F, 0.69F,
             0.49F, 0.75F, 0.43F,
             0.83F, 0.92F, 0.98F;
-    W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
+    //W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
 
     W_c << 0.1F, 0.23F, 0.54F, 0.98F, 0.464F, 0.176F, 0.584F, 0.045F, 1.0F, 0.2F;
     
@@ -161,20 +161,20 @@ void AC1::Reset() {
             0.05F, 0.42F, 0.69F,
             0.49F, 0.75F, 0.43F,
             0.83F, 0.92F, 0.98F;
-    //W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
+    W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
 
     W_c << 0.1F, 0.23F, 0.54F, 0.98F, 0.464F, 0.176F, 0.584F, 0.045F, 1.0F, 0.2F;
 
-    state->GetMutex();
-    for (int i = 0; i < 3; ++i) {
-        state->SetValueNoMutex(i, 0, 0.0F);
-        state->SetValueNoMutex(i, 1, 0.0F);
-    }
-    state->ReleaseMutex();
+    // state->GetMutex();
+    // for (int i = 0; i < 3; ++i) {
+    //     state->SetValueNoMutex(i, 0, 0.0F);
+    //     state->SetValueNoMutex(i, 1, 0.0F);
+    // }
+    // state->ReleaseMutex();
 
-    output->SetValue(0, 0, 0);
-    output->SetValue(1, 0, 0);
-    output->SetValue(2, 0, 0);
+    // output->SetValue(0, 0, 0);
+    // output->SetValue(1, 0, 0);
+    // output->SetValue(2, 0, 0);
     
 
 }

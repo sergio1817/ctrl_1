@@ -178,16 +178,16 @@ void Sliding_pos::Reset(void) {
 
     dum = 0.0F;
 
-    state->GetMutex();
-    for (int i = 0; i < 26; ++i) {
-        state->SetValueNoMutex(i, 0, 0.0F);
-    }
-    state->ReleaseMutex();
+    // state->GetMutex();
+    // for (int i = 0; i < 26; ++i) {
+    //     state->SetValueNoMutex(i, 0, 0.0F);
+    // }
+    // state->ReleaseMutex();
 
-    output->SetValue(0, 0, 0.0F);
-    output->SetValue(1, 0, 0.0F);
-    output->SetValue(2, 0, 0.0F);
-    output->SetValue(3, 0, 0.0F);
+    // output->SetValue(0, 0, 0.0F);
+    // output->SetValue(1, 0, 0.0F);
+    // output->SetValue(2, 0, 0.0F);
+    // output->SetValue(3, 0, 0.0F);
 
     
 
@@ -483,7 +483,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         nup_t0 = nup1;
     }
 
-    Eigen::Vector3f nupd = nup_t0*exp(-k_val*(tactual));
+    Eigen::Vector3f nupd = 0*nup_t0*exp(-k_val*(tactual));
 
     Eigen::Vector3f nup = nup1 - nupd;
 
@@ -502,17 +502,17 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f xirpp = xidpp - alphap_v.cwiseProduct(xiep) - gammap_v.cwiseProduct(sgnpos_p);
 
     ac2->SetValues(xie, xiep, nurp);
-    ac2->Update(now);
+    ac2->Update(GetTime());
     Eigen::Vector3f NNap = Eigen::Vector3f(ac2->Output(0), ac2->Output(1), ac2->Output(2));
 
     //std::cout<<"NNap: " << NNap.transpose() << '\n';
 
-    saturate(NNap, Eigen::Vector3f(-1,-1,-6), Eigen::Vector3f(1,1,0));
+    saturate(NNap, Eigen::Vector3f(-0.5,-0.5,-6), Eigen::Vector3f(0.5,0.5,0));
 
     Eigen::Vector3f uc = -Kpv.cwiseProduct(nurp);
     Eigen::Vector3f u = uc + NNap; //- m->Value()*g->Value()*ez + m->Value()*xirpp
 
-    saturate(u, Eigen::Vector3f(-1,-1,-6), Eigen::Vector3f(1,1,0));
+    saturate(u, Eigen::Vector3f(-0.5,-0.5,-6), Eigen::Vector3f(0.5,0.5,0));
 
     //std::cout<<"u: " << u.transpose() << '\n';
 
@@ -670,7 +670,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nur = nuq + gammao_v.cwiseProduct(sgnori);
 
     ac1->SetValues(QdTqe3, we, nur);
-    ac1->Update(now);
+    ac1->Update(GetTime());
     Eigen::Vector3f NNa = Eigen::Vector3f(ac1->Output(0), ac1->Output(1), ac1->Output(2));
 
     saturate(NNa, Eigen::Vector3f(-0.5,-0.5,-0.8), Eigen::Vector3f(0.5,0.5,0.8));
@@ -680,7 +680,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f tauc = -Kdv.cwiseProduct(nur);
     Eigen::Vector3f tau = tauc + NNa; // + NNa;
 
-    saturate(tau, Eigen::Vector3f(-0.5,-0.5,-0.8), Eigen::Vector3f(0.5,0.5,0.8));
+    //saturate(tau, Eigen::Vector3f(-0.5,-0.5,-0.8), Eigen::Vector3f(0.5,0.5,0.8));
 
     //std::cout<<"tau: " << tau.transpose() << std::endl;
 

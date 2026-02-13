@@ -112,12 +112,12 @@ void Sliding::Reset(void) {
     for (int i = 0; i < 7; ++i) {
         state->SetValueNoMutex(i, 0, 0.0F);
     }
-    state->ReleaseMutex();
+    // state->ReleaseMutex();
 
-    output->SetValue(0, 0, 0.0F);
-    output->SetValue(1, 0, 0.0F);
-    output->SetValue(2, 0, 0.0F);
-    output->SetValue(3, 0, 0.0F);
+    // output->SetValue(0, 0, 0.0F);
+    // output->SetValue(1, 0, 0.0F);
+    // output->SetValue(2, 0, 0.0F);
+    // output->SetValue(3, 0, 0.0F);
 //    pimpl_->i = 0;
 //    pimpl_->first_update = true;
 }
