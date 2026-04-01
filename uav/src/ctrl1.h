@@ -20,6 +20,9 @@
 #include "Sliding_pos.h"
 //#include "Sliding_force.h"
 
+// Trajectory manager (Phases 2-5)
+#include "TrajectoryManager.h"
+
 
 namespace flair {
     namespace gui {
@@ -104,6 +107,9 @@ class ctrl1 : public flair::meta::UavStateMachine {
         flair::gui::Label *lfx, *lfy, *lfz;
 
         flair::core::AhrsData *customReferenceOrientation,*customOrientation;
+
+        // ---- Trajectory Manager (Phases 2-5) ----
+        TrajectoryManager* traj_manager_;
         
 };
 
