@@ -17,7 +17,8 @@
 // Eigen
 #include <Eigen/Dense>
 
-// Flair core
+// Flair core — inherit from Object so we get Info/Warn/Err macros
+#include <Object.h>
 #include <Vector3D.h>    // flair::core::Vector3Df
 
 // Trajectory planner
@@ -47,7 +48,7 @@ namespace flair {
 // TrajectoryManager
 // ============================================================================
 
-class TrajectoryManager {
+class TrajectoryManager : public flair::core::Object {
 public:
     // -----------------------------------------------------------------------
     // State machine
@@ -87,6 +88,7 @@ public:
 
     /// @param parent   GroupBox in which all trajectory GUI widgets are placed.
     ///                 Typically the "Setup trajectory" GroupBox from ctrl1.
+    /// The GroupBox acts as the Flair parent Object.
     explicit TrajectoryManager(flair::gui::GroupBox* parent);
 
     ~TrajectoryManager();

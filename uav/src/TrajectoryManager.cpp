@@ -28,8 +28,7 @@
 // Flair core
 #include <Vector3D.h>
 
-// Flair threading (for Printf / Thread::Info)
-#include <Thread.h>
+// Object.h already included via TrajectoryManager.h — gives us Info/Warn/Err macros
 
 // Occupancy grid is already included via TrajectoryManager.h
 
@@ -53,7 +52,8 @@ using namespace flair::core;
 // ============================================================================
 
 TrajectoryManager::TrajectoryManager(GroupBox* parent)
-    : planner_mode_(0)
+    : flair::core::Object(parent, "TrajectoryManager", "TrajectoryManager")
+    , planner_mode_(0)
     , safety_margin_(0)
     , max_velocity_(0)
     , max_acceleration_(0)
@@ -154,7 +154,7 @@ void TrajectoryManager::addObstacleVrpn(const std::string& name,
                                          VrpnClient* /*client*/)
 {
     if (num_tracked_obstacles_ >= kMaxObstacles) {
-        flair::core::Thread::Warn("TrajectoryManager: max obstacles reached\n");
+        Warn("max obstacles reached\n");
         return;
     }
     int idx = num_tracked_obstacles_;
@@ -164,8 +164,7 @@ void TrajectoryManager::addObstacleVrpn(const std::string& name,
     obstacles_[idx].vrpn        = new MetaVrpnObject(name);
     obstacles_[idx].initialized = false;
     ++num_tracked_obstacles_;
-    flair::core::Thread::Info("TrajectoryManager: added obstacle VRPN '%s'\n",
-                               name.c_str());
+    Info("added obstacle VRPN '%s'\n", name.c_str());
 }
 
 // ============================================================================
@@ -687,7 +686,7 @@ bool TrajectoryManager::plan(const Eigen::Vector3d& uav_pos, double t_actual)
         // Warn but still accept the trajectory — in a real corridor planner
         // the QP constraints would enforce collision freedom.  For the
         // waypoint mode we log a warning and proceed.
-        flair::core::Thread::Warn("TrajectoryManager: trajectory may collide with obstacles\n");
+        Warn("trajectory may collide with obstacles\n");
         setStatus("Planned (collision warning)");
     } else {
         setStatus("Planned OK");
@@ -700,9 +699,9 @@ bool TrajectoryManager::plan(const Eigen::Vector3d& uav_pos, double t_actual)
     plan_start_pos_     = uav_pos;
     last_replan_time_   = t_actual;
 
-    flair::core::Thread::Info("TrajectoryManager: planned %.2f s trajectory (%d segs)\n",
-                               total_dur,
-                               static_cast<int>(waypoints.size()) - 1);
+    Info("planned %.2f s trajectory (%d segs)\n",
+         total_dur,
+         static_cast<int>(waypoints.size()) - 1);
     return true;
 }
 
@@ -742,7 +741,7 @@ void TrajectoryManager::update(float t_actual_f,
                 execution_start_time_ = t_actual;
                 last_replan_time_     = t_actual;
                 setStatus("Executing");
-                flair::core::Thread::Info("TrajectoryManager: execution started\n");
+                Info("execution started\n");
             }
         } else {
             setStatus("Error: no trajectory (press Plan first)");
@@ -762,7 +761,7 @@ void TrajectoryManager::update(float t_actual_f,
         if (elapsed >= total) {
             setStatus("Trajectory complete");
             state_ = State::IDLE;
-            flair::core::Thread::Info("TrajectoryManager: trajectory complete\n");
+            Info("trajectory complete\n");
             return;
         }
     }
@@ -793,8 +792,7 @@ void TrajectoryManager::update(float t_actual_f,
                 setStatus("Executing (replanned)");
             } else {
                 // Keep old trajectory — add a safety extension if near end
-                flair::core::Thread::Warn(
-                    "TrajectoryManager: replanning failed, continuing old trajectory\n");
+                Warn("replanning failed, continuing old trajectory\n");
                 state_ = State::EXECUTING;
                 setStatus("Executing (replan failed)");
                 last_replan_time_ = t_actual; // reset timer to avoid busy loop
@@ -866,5 +864,5 @@ void TrajectoryManager::stop()
 {
     state_ = State::IDLE;
     setStatus("Stopped");
-    flair::core::Thread::Info("TrajectoryManager: stopped\n");
+    Info("stopped\n");
 }
