@@ -1300,17 +1300,22 @@ bool TrajectoryManager::BuildCorridors(const std::vector<Eigen::Vector3d> &path,
             z_max = cand;
         }
 
-        // Shrink by safety margin
-        x_min += margin;
-        x_max -= margin;
-        y_min += margin;
-        y_max -= margin;
-        z_min += margin;
-        z_max -= margin;
+        // Note: obstacles are already inflated by (radius + safety_margin) in the
+        // occupancy grid, so the A* path and the AABB expansion already maintain
+        // safety_margin clearance. No additional corridor shrinkage is needed.
+        // Only shrink by a small epsilon to ensure the corridor boundary is strictly
+        // inside free space (avoids numerical edge cases).
+        double eps = grid_res_ * 0.5;
+        x_min += eps;
+        x_max -= eps;
+        y_min += eps;
+        y_max -= eps;
+        z_min += eps;
+        z_max -= eps;
 
         // Check corridor didn't collapse
         if (x_min >= x_max || y_min >= y_max || z_min >= z_max) {
-            Warn("corridor collapsed for segment %d\n", seg);
+            Warn("corridor collapsed for segment %d (try reducing safety margin or obstacle radius)\n", seg);
             return false;
         }
 
