@@ -1370,6 +1370,16 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
 
     double sm = safety_margin_->Value();
 
+    // Diagnostic: log obstacle positions
+    Info("obstacle avoidance: %d obstacles, safety_margin=%.2f, grid=%dx%dx%d (res=%.2f)\n",
+         num_obstacles_, sm, grid_nx_, grid_ny_, grid_nz_, grid_res_);
+    for (int i = 0; i < num_obstacles_; ++i) {
+        Info("  obstacle[%d]: pos=(%.2f, %.2f, %.2f) r=%.2f inflated_r=%.2f occupied=%d\n",
+             i, obstacles_[i].pos.x(), obstacles_[i].pos.y(), obstacles_[i].pos.z(),
+             obstacles_[i].radius, obstacles_[i].radius + sm,
+             IsOccupiedWorld(obstacles_[i].pos) ? 1 : 0);
+    }
+
     // Step 2: Find collision-free path through consecutive waypoints
     std::vector<Eigen::Vector3d> full_path;
     full_path.push_back(waypoints_[0]);
@@ -1377,11 +1387,21 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
     for (int i = 0; i < num_waypoints_ - 1; ++i) {
         std::vector<Eigen::Vector3d> seg_path;
         if (!FindPath(waypoints_[i], waypoints_[i + 1], seg_path)) {
-            Warn("A* failed between WP%d and WP%d\n", i, i + 1);
-            // Fallback: try direct connection
+            Warn("A* failed between WP%d(%.2f,%.2f,%.2f) and WP%d(%.2f,%.2f,%.2f)\n",
+                 i, waypoints_[i].x(), waypoints_[i].y(), waypoints_[i].z(),
+                 i+1, waypoints_[i+1].x(), waypoints_[i+1].y(), waypoints_[i+1].z());
+            Eigen::Vector3i s_g = WorldToGrid(waypoints_[i]);
+            Eigen::Vector3i g_g = WorldToGrid(waypoints_[i+1]);
+            Warn("  start_cell(%d,%d,%d) occ=%d, goal_cell(%d,%d,%d) occ=%d\n",
+                 s_g.x(), s_g.y(), s_g.z(), IsOccupied(s_g.x(), s_g.y(), s_g.z()),
+                 g_g.x(), g_g.y(), g_g.z(), IsOccupied(g_g.x(), g_g.y(), g_g.z()));
+            // Fallback: use direct connection (obstacle avoidance bypassed)
             seg_path.clear();
             seg_path.push_back(waypoints_[i]);
             seg_path.push_back(waypoints_[i + 1]);
+        } else {
+            Info("A* WP%d->WP%d: found path with %d points\n",
+                 i, i+1, static_cast<int>(seg_path.size()));
         }
         // Append (skip first to avoid duplicates)
         for (size_t j = 1; j < seg_path.size(); ++j) {
@@ -1405,6 +1425,10 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
     }
 
     Info("obstacle avoidance: path has %d waypoints\n", static_cast<int>(full_path.size()));
+    for (size_t i = 0; i < full_path.size(); ++i) {
+        Info("  path[%d]: (%.2f, %.2f, %.2f)\n",
+             static_cast<int>(i), full_path[i].x(), full_path[i].y(), full_path[i].z());
+    }
 
     // Step 3: Build SFC corridors around path
     std::vector<Corridor> corridors;
