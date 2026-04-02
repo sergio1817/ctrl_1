@@ -43,12 +43,7 @@ using namespace flair::core;
 using namespace flair::gui;
 
 // Workspace bounds (NED: z negative = up, ground at z=0)
-const double TrajectoryManager::WS_X_MIN = -5.0;
-const double TrajectoryManager::WS_X_MAX =  5.0;
-const double TrajectoryManager::WS_Y_MIN = -5.0;
-const double TrajectoryManager::WS_Y_MAX =  5.0;
-const double TrajectoryManager::WS_Z_MIN = -3.0;  // ceiling (highest altitude)
-const double TrajectoryManager::WS_Z_MAX =  0.0;  // ground
+// Default workspace bounds (overridden by GUI values in Plan())
 
 // ============================================================
 // Constructor
@@ -60,6 +55,9 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       state_(State::IDLE),
       output_matrix_(NULL),
       last_pos_(0, 0, 0),
+      WS_X_MIN(-5.0), WS_X_MAX(5.0),
+      WS_Y_MIN(-5.0), WS_Y_MAX(5.0),
+      WS_Z_MIN(-3.0), WS_Z_MAX(0.0),
       last_vel_(0, 0, 0),
       last_acc_(0, 0, 0),
       last_jerk_(0, 0, 0),
@@ -107,6 +105,19 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
     max_acc_ = new DoubleSpinBox(settings_box_->LastRowLastCol(), "Max accel", " m/s2", 0.1, 10.0, 0.1, 2);
     safety_margin_ = new DoubleSpinBox(settings_box_->NewRow(), "Safety margin", " m", 0.0, 1.0, 0.05, 2);
     replan_period_ = new DoubleSpinBox(settings_box_->LastRowLastCol(), "Replan period", " s", 0.0, 10.0, 0.5, 1);
+
+    // Obstacle avoidance settings
+    GroupBox *obs_box = new GroupBox(main_box->NewRow(), "Obstacle Avoidance");
+    obstacle_avoidance_mode_ = new ComboBox(obs_box->NewRow(), "Obstacle avoidance");
+    obstacle_avoidance_mode_->AddItem("Disabled");
+    obstacle_avoidance_mode_->AddItem("Enabled");
+    obstacle_radius_spin_ = new DoubleSpinBox(obs_box->LastRowLastCol(), "Obstacle radius", " m", 0.05, 1.0, 0.05, 2);
+
+    // Grid / workspace settings
+    GroupBox *grid_box = new GroupBox(main_box->NewRow(), "Grid Settings");
+    grid_res_spin_ = new DoubleSpinBox(grid_box->NewRow(), "Grid resolution", " m", 0.05, 0.5, 0.05, 2);
+    ws_xy_range_ = new DoubleSpinBox(grid_box->LastRowLastCol(), "XY range", " m", 1.0, 10.0, 0.5, 1);
+    ws_z_max_alt_ = new DoubleSpinBox(grid_box->LastRowLastCol(), "Max altitude", " m", 0.5, 5.0, 0.5, 1);
 
     // Waypoint count
     num_wp_spin_ = new SpinBox(settings_box_->NewRow(), "Num waypoints", 2, MAX_GUI_WAYPOINTS, 1);
@@ -390,9 +401,24 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
         }
     }
 
-    // Use full obstacle avoidance pipeline if obstacles present
+    // Update obstacle radius from GUI
+    double obs_r = obstacle_radius_spin_->Value();
+    for (int i = 0; i < num_obstacles_; ++i) {
+        obstacles_[i].radius = obs_r;
+    }
+
+    // Reinitialize grid with current GUI resolution and workspace
+    double res = grid_res_spin_->Value();
+    double xy_range = ws_xy_range_->Value();
+    double z_alt = ws_z_max_alt_->Value();
+    WS_X_MIN = -xy_range;  WS_X_MAX = xy_range;
+    WS_Y_MIN = -xy_range;  WS_Y_MAX = xy_range;
+    WS_Z_MIN = -z_alt;     WS_Z_MAX = 0.0;
+    InitGrid(res);
+
+    // Use full obstacle avoidance pipeline if enabled and obstacles present
     bool ok;
-    if (num_obstacles_ > 0) {
+    if (obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
         ok = PlanWithObstacleAvoidance();
     } else {
         ok = SolveMinSnap();
@@ -420,8 +446,14 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
     waypoints_[0] = Eigen::Vector3d(current_pos.x, current_pos.y, current_pos.z);
     start_vel_ = Eigen::Vector3d(current_vel.x, current_vel.y, current_vel.z);
 
+    // Update obstacle radius from GUI
+    double obs_r = obstacle_radius_spin_->Value();
+    for (int i = 0; i < num_obstacles_; ++i) {
+        obstacles_[i].radius = obs_r;
+    }
+
     bool ok;
-    if (num_obstacles_ > 0) {
+    if (obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
         ok = PlanWithObstacleAvoidance();
     } else {
         ok = SolveMinSnap();

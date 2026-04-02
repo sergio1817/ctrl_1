@@ -125,7 +125,8 @@ ctrl1::ctrl1(TargetController *controller)
     // Trajectory planner (IODevice, creates its own GUI and DataPlots)
     traj_manager_ = new TrajectoryManager(trajbox->NewRow(), tabWidget4, "Trajectory Planner");
 
-    // Register target rigid body as obstacle 0 (radius 0.15 m default)
+    // Register target rigid body as obstacle 0
+    // Initial position far away (z=-99), radius will be set by GUI before planning
     traj_manager_->AddObstacle(Vector3Df(0, 0, -99), 0.15f);
 
     position_behavior = new ComboBox(posbox->NewRow(),"Select behavior");

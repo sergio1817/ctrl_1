@@ -272,6 +272,11 @@ private:
     flair::gui::DoubleSpinBox *max_acc_;
     flair::gui::DoubleSpinBox *safety_margin_;
     flair::gui::DoubleSpinBox *replan_period_;
+    flair::gui::DoubleSpinBox *grid_res_spin_;
+    flair::gui::DoubleSpinBox *obstacle_radius_spin_;
+    flair::gui::ComboBox *obstacle_avoidance_mode_;
+    flair::gui::DoubleSpinBox *ws_xy_range_;
+    flair::gui::DoubleSpinBox *ws_z_max_alt_;
     flair::gui::SpinBox *num_wp_spin_;
     flair::gui::DoubleSpinBox *wp_x_[MAX_GUI_WAYPOINTS];
     flair::gui::DoubleSpinBox *wp_y_[MAX_GUI_WAYPOINTS];
@@ -295,12 +300,12 @@ private:
     // -------------------------------------------------------
 
     // Workspace bounds (NED: z negative = up, ground at z=0)
-    static const double WS_X_MIN;
-    static const double WS_X_MAX;
-    static const double WS_Y_MIN;
-    static const double WS_Y_MAX;
-    static const double WS_Z_MIN;  // ceiling (most negative z = highest altitude)
-    static const double WS_Z_MAX;  // ground at z=0
+    double WS_X_MIN;
+    double WS_X_MAX;
+    double WS_Y_MIN;
+    double WS_Y_MAX;
+    double WS_Z_MIN;  // ceiling (most negative z = highest altitude)
+    double WS_Z_MAX;  // ground at z=0
 
     // 3D occupancy grid (flat uint8_t array, row-major: ix * ny*nz + iy*nz + iz)
     std::vector<uint8_t> grid_data_;
