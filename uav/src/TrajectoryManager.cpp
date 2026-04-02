@@ -1,868 +1,721 @@
-// TrajectoryManager.cpp
+// %flair:license{
+// This file is part of the Flair framework distributed under the
+// CECILL-C License, Version 1.0.
+// %flair:license}
+//  created:    2024
+//  filename:   TrajectoryManager.cpp
 //
-// Implementation of TrajectoryManager — trajectory planning lifecycle for ctrl_1.
+//  author:     Sergio Urzua
+//              Copyright Heudiasyc UMR UTC/CNRS 7253
 //
-// Phases 2-5 of the implementation roadmap:
-//   Phase 2 — GUI + basic trajectory evaluation
-//   Phase 3 — VRPN obstacle tracking
-//   Phase 4 — Receding-horizon replanning
-//   Phase 5 — Dynamic obstacle prediction
+//  purpose:    IODevice-based trajectory planner with min-snap optimization
 //
-// C++11 / GCC 4.9 compatible.  No threads — all planning is synchronous,
-// executed inside the Flair real-time control loop when triggered by button
-// clicks or the replan timer.
+/*********************************************************************/
 
 #include "TrajectoryManager.h"
-
-// Flair GUI
+#include <Matrix.h>
+#include <MatrixDescriptor.h>
+#include <IODevice.h>
 #include <GroupBox.h>
 #include <DoubleSpinBox.h>
+#include <SpinBox.h>
 #include <PushButton.h>
-#include <ComboBox.h>
 #include <Label.h>
-
-// Flair sensor / meta
-#include <VrpnClient.h>
-#include <MetaVrpnObject.h>
-
-// Flair core
+#include <DataPlot1D.h>
+#include <DataPlot2D.h>
+#include <LayoutPosition.h>
+#include <Layout.h>
+#include <Thread.h>
 #include <Vector3D.h>
-
-// Object.h already included via TrajectoryManager.h — gives us Info/Warn/Err macros
-
-// Occupancy grid is already included via TrajectoryManager.h
-
-// Standard
-#include <cmath>
-#include <cstring>   // memset
-#include <stdexcept>
-#include <sstream>
-#include <algorithm>
-
-// Eigen
 #include <Eigen/Dense>
+#include <cmath>
+#include <algorithm>
+#include <cstring>
 
-using namespace flair::gui;
-using namespace flair::sensor;
-using namespace flair::meta;
+using std::string;
 using namespace flair::core;
+using namespace flair::gui;
 
-// ============================================================================
+
+// ============================================================
 // Constructor
-// ============================================================================
-
-TrajectoryManager::TrajectoryManager(GroupBox* parent)
-    : flair::core::Object(parent, "TrajectoryManager", "TrajectoryManager")
-    , planner_mode_(0)
-    , safety_margin_(0)
-    , max_velocity_(0)
-    , max_acceleration_(0)
-    , grid_resolution_(0)
-    , replan_period_(0)
-    , num_waypoints_(0)
-    , num_obstacles_(0)
-    , btn_plan_(0)
-    , btn_execute_(0)
-    , btn_stop_(0)
-    , status_label_(0)
-    , num_tracked_obstacles_(0)
-    , trajectory_valid_(false)
-    , state_(State::IDLE)
-    , execution_start_time_(0.0)
-    , last_replan_time_(0.0)
-    , plan_start_pos_(Eigen::Vector3d::Zero())
+// ============================================================
+TrajectoryManager::TrajectoryManager(const LayoutPosition *position, string name)
+    : IODevice(position->getLayout(), name),
+      state_(State::IDLE),
+      output_matrix_(NULL),
+      last_pos_(0, 0, 0),
+      last_vel_(0, 0, 0),
+      last_acc_(0, 0, 0),
+      last_jerk_(0, 0, 0),
+      progress_(0.0f),
+      num_segments_(0),
+      total_duration_(0.0),
+      trajectory_valid_(false),
+      execution_start_time_(0.0),
+      last_replan_time_(0.0),
+      num_waypoints_(2),
+      start_vel_(Eigen::Vector3d::Zero()),
+      end_vel_(Eigen::Vector3d::Zero()),
+      num_obstacles_(0)
 {
-    // Initialise obstacle array
-    for (int i = 0; i < kMaxObstacles; ++i) {
-        obstacles_[i] = ObstacleState();
-    }
-    // Initialise waypoint spinbox pointers
-    for (int i = 0; i < kMaxWaypoints; ++i) {
-        wp_x_[i] = 0;
-        wp_y_[i] = 0;
-        wp_z_[i] = 0;
-    }
+    // --------------------------------------------------------
+    // Output matrix with named elements (Flair pattern from Sliding_pos)
+    // --------------------------------------------------------
+    MatrixDescriptor *desc = new MatrixDescriptor(13, 1);
+    desc->SetElementName(0, 0, "des_x");
+    desc->SetElementName(1, 0, "des_y");
+    desc->SetElementName(2, 0, "des_z");
+    desc->SetElementName(3, 0, "des_vx");
+    desc->SetElementName(4, 0, "des_vy");
+    desc->SetElementName(5, 0, "des_vz");
+    desc->SetElementName(6, 0, "des_ax");
+    desc->SetElementName(7, 0, "des_ay");
+    desc->SetElementName(8, 0, "des_az");
+    desc->SetElementName(9, 0, "des_jx");
+    desc->SetElementName(10, 0, "des_jy");
+    desc->SetElementName(11, 0, "des_jz");
+    desc->SetElementName(12, 0, "progress");
+    output_matrix_ = new Matrix(this, desc, floatType, name);
+    delete desc;
 
-    // -------------------------------------------------------------------------
-    // GUI creation
-    // -------------------------------------------------------------------------
-    // Row 1: planner mode combo
-    planner_mode_ = new ComboBox(parent->NewRow(), "Planner mode");
-    planner_mode_->AddItem("Waypoint");
-    planner_mode_->AddItem("Corridor");
+    // --------------------------------------------------------
+    // GUI: Settings GroupBox
+    // --------------------------------------------------------
+    GroupBox *main_box = new GroupBox(position, name);
+    settings_box_ = new GroupBox(main_box->NewRow(), "Planner Settings");
 
-    // Row 2: planner parameters
-    safety_margin_    = new DoubleSpinBox(parent->NewRow(),    "Safety margin",   " m",    0.05, 1.0,   0.05, 2);
-    max_velocity_     = new DoubleSpinBox(parent->LastRowLastCol(), "Max velocity",  " m/s",  0.1,  5.0,   0.1,  2);
-    max_acceleration_ = new DoubleSpinBox(parent->LastRowLastCol(), "Max accel",     " m/s2", 0.1,  10.0,  0.1,  2);
+    max_vel_ = new DoubleSpinBox(settings_box_->NewRow(), "Max velocity", " m/s", 0.1, 5.0, 0.1, 2);
+    max_acc_ = new DoubleSpinBox(settings_box_->LastRowLastCol(), "Max accel", " m/s2", 0.1, 10.0, 0.1, 2);
+    safety_margin_ = new DoubleSpinBox(settings_box_->NewRow(), "Safety margin", " m", 0.0, 1.0, 0.05, 2);
+    replan_period_ = new DoubleSpinBox(settings_box_->LastRowLastCol(), "Replan period", " s", 0.0, 10.0, 0.5, 1);
 
-    // Default values (set via spinbox initialisation value — 4th arg of DoubleSpinBox
-    // in the Flair API is min; the 6th arg is step; there's no direct "default" ctor
-    // param in Flair, so we rely on the XML/flair saved config or accept the min as
-    // initial.  The values below match the spec defaults when no saved config exists.)
-    // NOTE: Flair DoubleSpinBox(parent, label, unit, min, max, step, decimals)
-    //       — no separate "default" parameter, GUI is initialised to min.
-    //       We document the intended defaults via comments.
-    //       Default: safety_margin=0.30, max_velocity=1.5, max_acceleration=3.0
+    // Waypoint count
+    num_wp_spin_ = new SpinBox(settings_box_->NewRow(), "Num waypoints", 2, MAX_WAYPOINTS, 1);
 
-    grid_resolution_ = new DoubleSpinBox(parent->NewRow(), "Grid resolution", " m",   0.05, 0.5,  0.05, 2);
-    replan_period_   = new DoubleSpinBox(parent->LastRowLastCol(), "Replan period",   " s",   0.5,  5.0,  0.5,  1);
-    // Default: grid_resolution=0.10, replan_period=2.0
-
-    // Row: num_waypoints, num_obstacles
-    num_waypoints_ = new DoubleSpinBox(parent->NewRow(),          "Waypoints (N)",  "",  1.0, 5.0, 1.0, 0);
-    num_obstacles_ = new DoubleSpinBox(parent->LastRowLastCol(),  "Obstacles (N)",  "",  0.0, 5.0, 1.0, 0);
-
-    // Waypoints — create 5 GroupBoxes with x/y/z spinboxes
-    // They are always present in the GUI; only the first num_waypoints_ are used.
-    const char* wp_labels[kMaxWaypoints] = { "WP1", "WP2", "WP3", "WP4", "WP5" };
-    for (int i = 0; i < kMaxWaypoints; ++i) {
-        GroupBox* wbox = new GroupBox(parent->NewRow(), wp_labels[i]);
-        wp_x_[i] = new DoubleSpinBox(wbox->NewRow(),          "x", " m", -10.0, 10.0, 0.1, 2);
-        wp_y_[i] = new DoubleSpinBox(wbox->LastRowLastCol(),  "y", " m", -10.0, 10.0, 0.1, 2);
-        wp_z_[i] = new DoubleSpinBox(wbox->LastRowLastCol(),  "z", " m", -10.0, 10.0, 0.1, 2);
+    // Waypoint coordinates
+    GroupBox *wp_box = new GroupBox(main_box->NewRow(), "Waypoints");
+    for (int i = 0; i < MAX_WAYPOINTS; ++i) {
+        char label_x[32], label_y[32], label_z[32];
+        snprintf(label_x, sizeof(label_x), "WP%d x", i);
+        snprintf(label_y, sizeof(label_y), "WP%d y", i);
+        snprintf(label_z, sizeof(label_z), "WP%d z", i);
+        wp_x_[i] = new DoubleSpinBox(wp_box->NewRow(), label_x, " m", -5.0, 5.0, 0.1, 2);
+        wp_y_[i] = new DoubleSpinBox(wp_box->LastRowLastCol(), label_y, " m", -5.0, 5.0, 0.1, 2);
+        wp_z_[i] = new DoubleSpinBox(wp_box->LastRowLastCol(), label_z, " m", -3.0, 0.0, 0.1, 2);
     }
 
-    // Control buttons
-    btn_plan_    = new PushButton(parent->NewRow(), "Plan");
-    btn_execute_ = new PushButton(parent->LastRowLastCol(), "Execute");
-    btn_stop_    = new PushButton(parent->LastRowLastCol(), "Stop");
+    // Buttons
+    GroupBox *ctrl_box = new GroupBox(main_box->NewRow(), "Control");
+    plan_button_ = new PushButton(ctrl_box->NewRow(), "Plan trajectory");
+    execute_button_ = new PushButton(ctrl_box->LastRowLastCol(), "Execute trajectory");
+    stop_button_ = new PushButton(ctrl_box->LastRowLastCol(), "Stop trajectory");
+    status_label_ = new Label(ctrl_box->NewRow(), "Status");
+    status_label_->SetText("IDLE");
 
-    // Status label
-    status_label_ = new Label(parent->NewRow(), "traj_status");
-    status_label_->SetText("Ready");
+    // --------------------------------------------------------
+    // DataPlots for trajectory visualization
+    // --------------------------------------------------------
+    // 2D XY trajectory plot
+    DataPlot2D *xy_plot = new DataPlot2D(position, "XY Trajectory",
+                                          "X [m]", -3, 3,
+                                          "Y [m]", -3, 3);
+    xy_plot->AddCurve(output_matrix_->Element(0, 0),
+                      output_matrix_->Element(1, 0),
+                      DataPlot::Red, "desired");
+
+    // 1D position plots
+    DataPlot1D *pos_x_plot = new DataPlot1D(position, "Desired X", -3, 3);
+    pos_x_plot->AddCurve(output_matrix_->Element(0, 0), DataPlot::Red, "des_x");
+
+    DataPlot1D *pos_y_plot = new DataPlot1D(position, "Desired Y", -3, 3);
+    pos_y_plot->AddCurve(output_matrix_->Element(1, 0), DataPlot::Green, "des_y");
+
+    DataPlot1D *pos_z_plot = new DataPlot1D(position, "Desired Z", -3, 0);
+    pos_z_plot->AddCurve(output_matrix_->Element(2, 0), DataPlot::Blue, "des_z");
+
+    // Velocity plot
+    DataPlot1D *vel_plot = new DataPlot1D(position, "Desired Vel", -5, 5);
+    vel_plot->AddCurve(output_matrix_->Element(3, 0), DataPlot::Red, "vx");
+    vel_plot->AddCurve(output_matrix_->Element(4, 0), DataPlot::Green, "vy");
+    vel_plot->AddCurve(output_matrix_->Element(5, 0), DataPlot::Blue, "vz");
+
+    // Progress plot
+    DataPlot1D *prog_plot = new DataPlot1D(position, "Progress", 0, 1.1f);
+    prog_plot->AddCurve(output_matrix_->Element(12, 0), DataPlot::Black, "t/T");
+
+    // --------------------------------------------------------
+    // Initialize waypoints to defaults
+    // --------------------------------------------------------
+    for (int i = 0; i < MAX_WAYPOINTS; ++i) {
+        waypoints_[i] = Eigen::Vector3d::Zero();
+    }
+
+    // Initialize segments
+    for (int i = 0; i < MAX_SEGMENTS; ++i) {
+        segments_[i].coeffs.setZero();
+        segments_[i].duration = 0.0;
+    }
+
+    // Initialize obstacles
+    for (int i = 0; i < MAX_OBSTACLES; ++i) {
+        obstacles_[i].pos = Eigen::Vector3d::Zero();
+        obstacles_[i].vel = Eigen::Vector3d::Zero();
+        obstacles_[i].radius = 0.0;
+    }
+
+    // Add output to data log
+    AddDataToLog(output_matrix_);
 }
 
-// ============================================================================
+// ============================================================
 // Destructor
-// ============================================================================
-
-TrajectoryManager::~TrajectoryManager()
-{
-    // VRPN objects are owned by the Flair FrameworkManager tree —
-    // do NOT delete them here; Flair deletes them via its object tree.
-    // obstacle[].vrpn pointers are left dangling intentionally.
-    // Other Flair GUI objects (spinboxes, buttons, etc.) are also owned
-    // by the parent GroupBox and will be destroyed by Flair.
+// ============================================================
+TrajectoryManager::~TrajectoryManager() {
+    delete output_matrix_;
 }
 
-// ============================================================================
-// addObstacleVrpn
-// ============================================================================
-
-void TrajectoryManager::addObstacleVrpn(const std::string& name,
-                                         VrpnClient* /*client*/)
-{
-    if (num_tracked_obstacles_ >= kMaxObstacles) {
-        Warn("max obstacles reached\n");
-        return;
+// ============================================================
+// Update - called from control loop at each tick
+// ============================================================
+void TrajectoryManager::Update(Time time) {
+    // Check GUI buttons
+    if (plan_button_->Clicked()) {
+        Vector3Df dummy_pos(0, 0, 0);
+        Vector3Df dummy_vel(0, 0, 0);
+        Plan(dummy_pos, dummy_vel);
     }
-    int idx = num_tracked_obstacles_;
-    // MetaVrpnObject is constructed without a VrpnClient parameter in Flair —
-    // the VrpnClient is the singleton that was already started; MetaVrpnObject
-    // automatically registers with it.
-    obstacles_[idx].vrpn        = new MetaVrpnObject(name);
-    obstacles_[idx].initialized = false;
-    ++num_tracked_obstacles_;
-    Info("added obstacle VRPN '%s'\n", name.c_str());
+    if (execute_button_->Clicked() && state_ == State::PLANNED) {
+        StartTraj();
+        execution_start_time_ = static_cast<double>(time) / 1e9;
+    }
+    if (stop_button_->Clicked()) {
+        StopTraj();
+    }
+
+    // Convert Flair time to seconds
+    double t_sec = static_cast<double>(time) / 1e9;
+
+    if (state_ == State::EXECUTING && trajectory_valid_) {
+        double t_traj = t_sec - execution_start_time_;
+        double elapsed = (t_traj < 0.0) ? 0.0 : ((t_traj > total_duration_) ? total_duration_ : t_traj);
+        float prog = (total_duration_ > 1e-9) ? static_cast<float>(elapsed / total_duration_) : 1.0f;
+
+        Eigen::Vector3d p = EvalPos(elapsed);
+        Eigen::Vector3d v = EvalVel(elapsed);
+        Eigen::Vector3d a = EvalAcc(elapsed);
+        Eigen::Vector3d j = EvalJer(elapsed);
+
+        // Thread-safe matrix update (Flair pattern)
+        output_matrix_->GetMutex();
+        output_matrix_->SetValueNoMutex(0, 0, static_cast<float>(p.x()));
+        output_matrix_->SetValueNoMutex(1, 0, static_cast<float>(p.y()));
+        output_matrix_->SetValueNoMutex(2, 0, static_cast<float>(p.z()));
+        output_matrix_->SetValueNoMutex(3, 0, static_cast<float>(v.x()));
+        output_matrix_->SetValueNoMutex(4, 0, static_cast<float>(v.y()));
+        output_matrix_->SetValueNoMutex(5, 0, static_cast<float>(v.z()));
+        output_matrix_->SetValueNoMutex(6, 0, static_cast<float>(a.x()));
+        output_matrix_->SetValueNoMutex(7, 0, static_cast<float>(a.y()));
+        output_matrix_->SetValueNoMutex(8, 0, static_cast<float>(a.z()));
+        output_matrix_->SetValueNoMutex(9, 0, static_cast<float>(j.x()));
+        output_matrix_->SetValueNoMutex(10, 0, static_cast<float>(j.y()));
+        output_matrix_->SetValueNoMutex(11, 0, static_cast<float>(j.z()));
+        output_matrix_->SetValueNoMutex(12, 0, prog);
+        output_matrix_->ReleaseMutex();
+
+        // Store for GetPosition/GetSpeed/etc accessors
+        last_pos_ = Vector3Df(static_cast<float>(p.x()),
+                              static_cast<float>(p.y()),
+                              static_cast<float>(p.z()));
+        last_vel_ = Vector3Df(static_cast<float>(v.x()),
+                              static_cast<float>(v.y()),
+                              static_cast<float>(v.z()));
+        last_acc_ = Vector3Df(static_cast<float>(a.x()),
+                              static_cast<float>(a.y()),
+                              static_cast<float>(a.z()));
+        last_jerk_ = Vector3Df(static_cast<float>(j.x()),
+                               static_cast<float>(j.y()),
+                               static_cast<float>(j.z()));
+        progress_ = prog;
+
+        // Signal data update to DataPlot framework
+        output_matrix_->SetDataTime(time);
+        ProcessUpdate(output_matrix_);
+
+        // Check trajectory completion
+        if (t_traj >= total_duration_) {
+            state_ = State::IDLE;
+            status_label_->SetText("IDLE (complete)");
+            Info("trajectory complete\n");
+        }
+
+        // Check replan trigger
+        double rp = replan_period_->Value();
+        if (rp > 0.0 && (t_traj - last_replan_time_) >= rp) {
+            last_replan_time_ = t_traj;
+            // Could trigger Replan here if obstacle avoidance is active
+        }
+    } else {
+        // Not executing - zero output
+        output_matrix_->GetMutex();
+        for (int i = 0; i < 13; ++i) {
+            output_matrix_->SetValueNoMutex(i, 0, 0.0f);
+        }
+        output_matrix_->ReleaseMutex();
+
+        last_pos_ = Vector3Df(0, 0, 0);
+        last_vel_ = Vector3Df(0, 0, 0);
+        last_acc_ = Vector3Df(0, 0, 0);
+        last_jerk_ = Vector3Df(0, 0, 0);
+        progress_ = 0.0f;
+
+        output_matrix_->SetDataTime(time);
+        ProcessUpdate(output_matrix_);
+    }
 }
 
-// ============================================================================
-// setStatus
-// ============================================================================
+// ============================================================
+// Accessors
+// ============================================================
+void TrajectoryManager::GetPosition(Vector3Df &pos) const {
+    pos = last_pos_;
+}
 
-void TrajectoryManager::setStatus(const std::string& text)
-{
-    if (status_label_) {
-        status_label_->SetText(text);
+void TrajectoryManager::GetSpeed(Vector3Df &vel) const {
+    vel = last_vel_;
+}
+
+void TrajectoryManager::GetAcceleration(Vector3Df &acc) const {
+    acc = last_acc_;
+}
+
+void TrajectoryManager::GetJerk(Vector3Df &jerk) const {
+    jerk = last_jerk_;
+}
+
+Matrix *TrajectoryManager::GetMatrix() const {
+    return output_matrix_;
+}
+
+float TrajectoryManager::GetProgress() const {
+    return progress_;
+}
+
+bool TrajectoryManager::IsRunning() const {
+    return state_ == State::EXECUTING;
+}
+
+// ============================================================
+// Lifecycle
+// ============================================================
+void TrajectoryManager::StartTraj() {
+    if (state_ == State::PLANNED && trajectory_valid_) {
+        state_ = State::EXECUTING;
+        last_replan_time_ = 0.0;
+        status_label_->SetText("EXECUTING");
+        Info("trajectory execution started\n");
     }
 }
 
-// ============================================================================
-// updateObstacles (Phase 3 & 5)
-// ============================================================================
+void TrajectoryManager::StopTraj() {
+    state_ = State::IDLE;
+    status_label_->SetText("IDLE (stopped)");
+    Info("trajectory stopped\n");
+}
 
-void TrajectoryManager::updateObstacles(double t_actual)
-{
-    int n = num_tracked_obstacles_;
-    // Also read the GUI num_obstacles to determine how many to actually poll
-    int n_gui = static_cast<int>(num_obstacles_->Value());
-    if (n_gui < n) n = n_gui;
+// ============================================================
+// Planning
+// ============================================================
+bool TrajectoryManager::Plan(const Vector3Df &current_pos,
+                             const Vector3Df &current_vel) {
+    state_ = State::PLANNING;
+    status_label_->SetText("PLANNING...");
 
-    for (int i = 0; i < n; ++i) {
-        ObstacleState& obs = obstacles_[i];
-        if (!obs.vrpn) continue;
-        if (!obs.vrpn->IsTracked(500)) continue;  // timeout 500 ms
+    ReadWaypointsFromGUI();
 
-        Vector3Df flair_pos;
-        obs.vrpn->GetPosition(flair_pos);
+    start_vel_ = Eigen::Vector3d(current_vel.x, current_vel.y, current_vel.z);
+    end_vel_ = Eigen::Vector3d::Zero();
 
-        Eigen::Vector3d new_pos(static_cast<double>(flair_pos.x),
-                                static_cast<double>(flair_pos.y),
-                                static_cast<double>(flair_pos.z));
+    bool ok = SolveMinSnap();
+    if (ok) {
+        state_ = State::PLANNED;
+        status_label_->SetText("PLANNED (ready)");
+        Info("trajectory planned: %d segments, %.2f s\n", num_segments_, total_duration_);
+    } else {
+        state_ = State::IDLE;
+        status_label_->SetText("PLAN FAILED");
+        Warn("trajectory planning failed\n");
+    }
+    return ok;
+}
 
-        if (!obs.initialized) {
-            obs.position      = new_pos;
-            obs.prev_position = new_pos;
-            obs.velocity      = Eigen::Vector3d::Zero();
-            obs.prev_time     = t_actual;
-            obs.initialized   = true;
-        } else {
-            double dt = t_actual - obs.prev_time;
-            if (dt > 1e-4) {
-                // Numerical differentiation with exponential low-pass filter
-                // alpha = dt / (tau + dt),  tau = 0.1 s
-                const double tau  = 0.1;
-                double alpha      = dt / (tau + dt);
-                Eigen::Vector3d raw_vel = (new_pos - obs.prev_position) / dt;
-                obs.velocity      = (1.0 - alpha) * obs.velocity + alpha * raw_vel;
-                obs.prev_position = new_pos;
-                obs.prev_time     = t_actual;
-            }
-            obs.position = new_pos;
-        }
+bool TrajectoryManager::Replan(const Vector3Df &current_pos,
+                               const Vector3Df &current_vel) {
+    State prev = state_;
+    state_ = State::REPLANNING;
+    status_label_->SetText("REPLANNING...");
+
+    // Update first waypoint to current position
+    waypoints_[0] = Eigen::Vector3d(current_pos.x, current_pos.y, current_pos.z);
+    start_vel_ = Eigen::Vector3d(current_vel.x, current_vel.y, current_vel.z);
+
+    bool ok = SolveMinSnap();
+    if (ok) {
+        state_ = State::EXECUTING;
+        status_label_->SetText("EXECUTING (replanned)");
+    } else {
+        state_ = prev;
+        Warn("replanning failed, continuing with old trajectory\n");
+    }
+    return ok;
+}
+
+// ============================================================
+// Obstacle management
+// ============================================================
+void TrajectoryManager::AddObstacle(const Vector3Df &pos, float radius) {
+    if (num_obstacles_ < MAX_OBSTACLES) {
+        obstacles_[num_obstacles_].pos = Eigen::Vector3d(pos.x, pos.y, pos.z);
+        obstacles_[num_obstacles_].vel = Eigen::Vector3d::Zero();
+        obstacles_[num_obstacles_].radius = static_cast<double>(radius);
+        num_obstacles_++;
     }
 }
 
-// ============================================================================
-// predictObstaclePos (Phase 5 — constant velocity model)
-// ============================================================================
-
-Eigen::Vector3d TrajectoryManager::predictObstaclePos(int idx, double dt) const
-{
-    const ObstacleState& obs = obstacles_[idx];
-    return obs.position + obs.velocity * dt;
+void TrajectoryManager::ClearObstacles() {
+    num_obstacles_ = 0;
 }
 
-// ============================================================================
-// allocateTimes
-// ============================================================================
-
-std::vector<double> TrajectoryManager::allocateTimes(
-    const std::vector<Eigen::Vector3d>& wps,
-    double max_vel) const
-{
-    std::vector<double> times;
-    if (wps.size() < 2) return times;
-    for (size_t i = 0; i + 1 < wps.size(); ++i) {
-        double dist = (wps[i+1] - wps[i]).norm();
-        double t    = dist / max_vel;
-        if (t < 0.2) t = 0.2;   // minimum segment duration
-        times.push_back(t);
+void TrajectoryManager::UpdateObstaclePosition(int idx, const Vector3Df &pos) {
+    if (idx >= 0 && idx < num_obstacles_) {
+        obstacles_[idx].pos = Eigen::Vector3d(pos.x, pos.y, pos.z);
     }
-    return times;
 }
 
-// ============================================================================
-// solveMinSnap1D
+void TrajectoryManager::UpdateObstacleVelocity(int idx, const Vector3Df &vel) {
+    if (idx >= 0 && idx < num_obstacles_) {
+        obstacles_[idx].vel = Eigen::Vector3d(vel.x, vel.y, vel.z);
+    }
+}
+
+// ============================================================
+// Internal: Read waypoints from GUI spinboxes
+// ============================================================
+void TrajectoryManager::ReadWaypointsFromGUI() {
+    num_waypoints_ = num_wp_spin_->Value();
+    if (num_waypoints_ < 2) num_waypoints_ = 2;
+    if (num_waypoints_ > MAX_WAYPOINTS) num_waypoints_ = MAX_WAYPOINTS;
+
+    for (int i = 0; i < num_waypoints_; ++i) {
+        waypoints_[i] = Eigen::Vector3d(wp_x_[i]->Value(),
+                                         wp_y_[i]->Value(),
+                                         wp_z_[i]->Value());
+    }
+}
+
+// ============================================================
+// Internal: Solve minimum-snap trajectory
+// ============================================================
 //
-// Minimum-snap QP for a single axis.
+// Solves the closed-form unconstrained min-snap problem for M segments.
+// Each segment is a degree-7 polynomial in t: p(t) = sum_{k=0}^{7} c_k * t^k
+// Boundary conditions: position, velocity, acceleration, jerk at endpoints.
+// Interior waypoint conditions: position continuity + C3 continuity.
 //
-// For N waypoints (N-1 segments), each segment i has a 7th-order polynomial
-// p_i(tau) = sum_{k=0}^{7} c_{i,k} * tau^k,  tau in [0, T_i]
+// This is a standard banded linear system: 8M unknowns, 8M equations.
+// For M <= 6, size is at most 48x48 - trivially fast.
 //
-// Continuity constraints at interior waypoints (position through jerk, 4 orders)
-// give 4*(N-2) equations. Endpoint conditions (pos, vel=0, acc=0, jerk=0 at
-// start and end) give 8 equations. Waypoint position constraints: N equations.
-// Total constraints: 4*(N-2) + 8 + (N-2) = 5N - 2 + ... actually we use the
-// standard unconstrained minimum-snap closed-form for a sequence of waypoints.
-//
-// We use the "snap matrix" approach (Richter et al. 2016):
-// Minimise sum_i int_0^{T_i} (p_i^(4)(tau))^2 dtau
-// subject to: position continuity, derivative continuity up to order 3, and
-//             boundary conditions at start/end (vel=acc=jerk=0).
-//
-// For simplicity and GCC 4.9 compatibility we implement the direct matrix form.
-// The system size is 8*M x 8*M where M = N-1 (number of segments).
-//
-// Returns true on success.  Fills axis row of traj pieces.
-// ============================================================================
-
-bool TrajectoryManager::solveMinSnap1D(const std::vector<double>& pos,
-                                        const std::vector<double>& times,
-                                        int axis,
-                                        uav_planning::Trajectory<7>& traj)
-{
-    // N = number of waypoints, M = N-1 = number of segments
-    int N = static_cast<int>(pos.size());
-    int M = static_cast<int>(times.size());
-    if (N < 2 || M != N - 1) return false;
-
-    // Degree D = 7, so 8 coefficients per segment
-    const int D = 8;  // coefficients per segment (polynomial of degree 7)
-    int total_vars = D * M;
-
-    // We build the constraint matrix A and rhs b for the equality constraints.
-    // -------------------------------------------------------------------------
-    // Constraint ordering:
-    //
-    // [A] Endpoint constraints (8):
-    //   Start:  p_0(0)=pos[0], p_0'(0)=0, p_0''(0)=0, p_0'''(0)=0
-    //   End:    p_{M-1}(T_{M-1})=pos[N-1], p'=0, p''=0, p'''=0
-    //
-    // [B] Continuity at interior waypoints (5*(N-2) constraints each):
-    //   Position match: p_i(T_i) = pos[i+1]  (N-2 constraints)
-    //   Derivative continuity (4 orders): p_i^(k)(T_i) = p_{i+1}^(k)(0)  (4*(N-2) constraints)
-    //
-    // Total constraints: 8 + (N-2)*5 = 5N - 2
-    //
-    // For M segments we have 8M unknowns. To get a square system we need 8M eqs.
-    // The remaining 8M - (5N-2) = 8(N-1) - 5N + 2 = 3N - 6 degrees of freedom
-    // are the free derivatives at intermediate waypoints. We set them free and
-    // use the minimum-snap gradient condition: the gradient of the snap cost
-    // w.r.t. free derivatives = 0. This gives a banded system.
-    //
-    // Implementation: We follow the "endpoint derivative" formulation from
-    // Richter et al. 2016 (mav_trajectory_generation).
-    //
-    // For GCC 4.9 compatibility we use Eigen matrices directly.
-    // -------------------------------------------------------------------------
-
-    // Helper: evaluate polynomial basis vector at time t
-    //   b(t) = [1, t, t^2, ..., t^{D-1}]
-    // Returns derivative of order 'deriv'
-    // (This is a local lambda — but GCC 4.9 doesn't support generic lambdas.
-    //  We use a local struct with operator() instead.)
-
-    struct PolyBasis {
-        // Returns k-th row of 8x1 basis vector for order-deriv derivative at t
-        static Eigen::Matrix<double, 8, 1> eval(double t, int deriv) {
-            Eigen::Matrix<double, 8, 1> b;
-            b.setZero();
-            for (int j = deriv; j < 8; ++j) {
-                // Coefficient of t^{j-deriv} in d^deriv/dt^deriv (t^j)
-                double factor = 1.0;
-                for (int k = 0; k < deriv; ++k) {
-                    factor *= static_cast<double>(j - k);
-                }
-                double tpow = 1.0;
-                for (int k = 0; k < j - deriv; ++k) {
-                    tpow *= t;
-                }
-                b(j) = factor * tpow;
-            }
-            return b;
-        }
-    };
-
-    // Build constraint matrix A (Nc x total_vars) and rhs b (Nc x 1)
-    // We use the "fixed derivative" formulation: at every waypoint we fix
-    // positions; at start and end we also fix vel=acc=jerk=0; interior
-    // derivatives (vel, acc, jerk) are determined by the minimum-snap condition.
-    //
-    // Strategy: assemble the square system using the endpoint derivative
-    // ordering from Richter et al.  For each segment, the 8 unknowns are the
-    // values of p^(0)..p^(3) at start, and p^(0)..p^(3) at end (the "d" vector).
-    // The Q (cost) and M (mapping) matrices relate this parameterisation to the
-    // polynomial coefficients.
-
-    // For brevity we implement the direct "polynomial coefficient" formulation.
-    // We build the full 8M x 8M system:
-    //   - First 4 rows: start endpoint constraints (pos, vel=0, acc=0, jerk=0)
-    //   - Next 4 rows: end endpoint constraints
-    //   - For each interior waypoint i (i=1..N-2): 5 constraints
-    //     (continuity of pos + 4 derivatives)
-    //   - Remaining rows: minimum-snap gradient conditions (free derivatives)
-
-    // ---- Build the system using Eigen ----
-    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(total_vars, total_vars);
-    Eigen::VectorXd b_rhs = Eigen::VectorXd::Zero(total_vars);
-    int row = 0;
-
-    // --- Endpoint constraints for segment 0, at tau=0 ---
-    {
-        // p_0(0) = pos[0]
-        Eigen::Matrix<double, 8, 1> basis = PolyBasis::eval(0.0, 0);
-        A.block<1, 8>(row, 0) = basis.transpose();
-        b_rhs(row) = pos[0];
-        ++row;
-
-        // p_0'(0) = 0
-        basis = PolyBasis::eval(0.0, 1);
-        A.block<1, 8>(row, 0) = basis.transpose();
-        b_rhs(row) = 0.0;
-        ++row;
-
-        // p_0''(0) = 0
-        basis = PolyBasis::eval(0.0, 2);
-        A.block<1, 8>(row, 0) = basis.transpose();
-        b_rhs(row) = 0.0;
-        ++row;
-
-        // p_0'''(0) = 0
-        basis = PolyBasis::eval(0.0, 3);
-        A.block<1, 8>(row, 0) = basis.transpose();
-        b_rhs(row) = 0.0;
-        ++row;
+bool TrajectoryManager::SolveMinSnap() {
+    num_segments_ = num_waypoints_ - 1;
+    if (num_segments_ < 1 || num_segments_ > MAX_SEGMENTS) {
+        return false;
     }
 
-    // --- Interior waypoint constraints ---
-    for (int i = 0; i < M - 1; ++i) {
-        double Ti = times[i];
-        int col_i   = D * i;       // start of segment i coefficients
-        int col_ip1 = D * (i + 1); // start of segment i+1 coefficients
+    const int M = num_segments_;
+    const int N = 8;  // coefficients per segment per axis
+    const int dim = M * N;  // total unknowns per axis
 
-        // Position: p_i(T_i) = pos[i+1]
-        {
-            Eigen::Matrix<double, 8, 1> basis = PolyBasis::eval(Ti, 0);
-            A.block<1, 8>(row, col_i) = basis.transpose();
-            b_rhs(row) = pos[i + 1];
-            ++row;
-        }
+    // Allocate time per segment based on distance / max_vel
+    double v_max = max_vel_->Value();
+    if (v_max < 0.1) v_max = 0.1;
 
-        // Continuity of derivatives 0..3 at junction:
-        //   p_i^(k)(T_i) = p_{i+1}^(k)(0)
-        // Rewritten: p_i^(k)(T_i) - p_{i+1}^(k)(0) = 0
-        for (int k = 0; k <= 3; ++k) {
-            Eigen::Matrix<double, 8, 1> basis_end   = PolyBasis::eval(Ti,  k);
-            Eigen::Matrix<double, 8, 1> basis_start = PolyBasis::eval(0.0, k);
-            A.block<1, 8>(row, col_i)   =  basis_end.transpose();
-            A.block<1, 8>(row, col_ip1) = -basis_start.transpose();
-            b_rhs(row) = 0.0;
-            ++row;
-        }
-    }
-
-    // --- Endpoint constraints for segment M-1, at tau=T_{M-1} ---
-    {
-        int col_last = D * (M - 1);
-        double Tlast = times[M - 1];
-
-        // p_{M-1}(T_{M-1}) = pos[N-1]
-        Eigen::Matrix<double, 8, 1> basis = PolyBasis::eval(Tlast, 0);
-        A.block<1, 8>(row, col_last) = basis.transpose();
-        b_rhs(row) = pos[N - 1];
-        ++row;
-
-        // p'=0
-        basis = PolyBasis::eval(Tlast, 1);
-        A.block<1, 8>(row, col_last) = basis.transpose();
-        b_rhs(row) = 0.0;
-        ++row;
-
-        // p''=0
-        basis = PolyBasis::eval(Tlast, 2);
-        A.block<1, 8>(row, col_last) = basis.transpose();
-        b_rhs(row) = 0.0;
-        ++row;
-
-        // p'''=0
-        basis = PolyBasis::eval(Tlast, 3);
-        A.block<1, 8>(row, col_last) = basis.transpose();
-        b_rhs(row) = 0.0;
-        ++row;
-    }
-
-    // --- Minimum-snap condition for free derivative rows ---
-    // Remaining rows (row .. total_vars-1) correspond to higher-order continuity
-    // enforced as soft conditions: for each remaining DOF, set p_i^(4)(0) = 0
-    // or use the snap minimisation gradient.  For the simple underdetermined case
-    // (M=1, 8 constraints, 8 unknowns — already satisfied), and for M>1 we fill
-    // the remaining rows by enforcing continuity of derivatives 4..7 at each
-    // junction (up to remaining rows).
-    {
-        int extra_per_junction = 3; // derivatives 4,5,6 (order 3 already used above)
-        for (int i = 0; i < M - 1 && row < total_vars; ++i) {
-            double Ti    = times[i];
-            int col_i    = D * i;
-            int col_ip1  = D * (i + 1);
-            for (int k = 4; k <= 7 && row < total_vars; ++k) {
-                Eigen::Matrix<double, 8, 1> basis_end   = PolyBasis::eval(Ti,  k);
-                Eigen::Matrix<double, 8, 1> basis_start = PolyBasis::eval(0.0, k);
-                A.block<1, 8>(row, col_i)   =  basis_end.transpose();
-                A.block<1, 8>(row, col_ip1) = -basis_start.transpose();
-                b_rhs(row) = 0.0;
-                ++row;
-            }
-        }
-        // If still underfilled (single segment M=1 needs exactly 8 rows; the
-        // endpoint block already provided 8, row==8 — nothing extra needed)
-    }
-
-    // Sanity check
-    if (row != total_vars) {
-        // Remaining rows: leave as identity with rhs=0 (zero coefficients)
-        // This handles edge cases and keeps the matrix invertible.
-        while (row < total_vars) {
-            A(row, row) = 1.0;
-            b_rhs(row)  = 0.0;
-            ++row;
-        }
-    }
-
-    // Solve: A * c = b_rhs
-    Eigen::VectorXd coeff_vec;
-    {
-        // Use LU decomposition for robustness
-        Eigen::FullPivLU<Eigen::MatrixXd> lu(A);
-        if (!lu.isInvertible()) {
-            // Fallback: least-squares solution
-            coeff_vec = A.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV)
-                          .solve(b_rhs);
-        } else {
-            coeff_vec = lu.solve(b_rhs);
-        }
-    }
-
-    // Store coefficients into traj pieces for this axis
-    // traj already has M pieces allocated by solveMinSnap; we update row 'axis'.
+    double durations[MAX_SEGMENTS];
+    total_duration_ = 0.0;
     for (int i = 0; i < M; ++i) {
-        uav_planning::Piece<7>& piece = traj.getPiece(i);
-        uav_planning::Piece<7>::CoeffMatrix& coeffs = piece.getCoeffs();
-        for (int k = 0; k < 8; ++k) {
-            coeffs(axis, k) = coeff_vec(D * i + k);
-        }
+        double dist = (waypoints_[i + 1] - waypoints_[i]).norm();
+        double t_seg = dist / v_max;
+        if (t_seg < 0.5) t_seg = 0.5;  // minimum segment time
+        durations[i] = t_seg;
+        total_duration_ += t_seg;
     }
 
-    return true;
-}
-
-// ============================================================================
-// solveMinSnap
-// ============================================================================
-
-bool TrajectoryManager::solveMinSnap(const std::vector<Eigen::Vector3d>& waypoints,
-                                      const std::vector<double>& times,
-                                      uav_planning::Trajectory<7>& traj)
-{
-    int N = static_cast<int>(waypoints.size());
-    int M = static_cast<int>(times.size());
-    if (N < 2 || M != N - 1) return false;
-
-    // Initialise trajectory with M pieces (zero coefficients, correct durations)
-    traj.clear();
-    for (int i = 0; i < M; ++i) {
-        uav_planning::Piece<7>::CoeffMatrix zeros;
-        zeros.setZero();
-        traj.addPiece(times[i], zeros);
-    }
-
-    // Solve per axis
+    // Solve for each axis independently
     for (int axis = 0; axis < 3; ++axis) {
-        std::vector<double> pos_axis(N);
-        for (int i = 0; i < N; ++i) {
-            pos_axis[i] = waypoints[i](axis);
+        // Build and solve the linear system A * c = b
+        Eigen::MatrixXd A = Eigen::MatrixXd::Zero(dim, dim);
+        Eigen::VectorXd b = Eigen::VectorXd::Zero(dim);
+
+        int row = 0;
+
+        // Helper: powers of t and factorial coefficients for derivatives
+        // p(t) = c0 + c1*t + c2*t^2 + ... + c7*t^7
+        // p'(t) = c1 + 2*c2*t + 3*c3*t^2 + ... + 7*c7*t^6
+        // p''(t) = 2*c2 + 6*c3*t + 12*c4*t^2 + ... + 42*c7*t^5
+        // p'''(t) = 6*c3 + 24*c4*t + 60*c5*t^2 + 120*c6*t^3 + 210*c7*t^4
+
+        // Start boundary: p_0(0)=pos0, p_0'(0)=v0, p_0''(0)=0, p_0'''(0)=0
+        {
+            int seg_off = 0;
+            // pos at t=0: c0 = pos
+            A(row, seg_off + 0) = 1.0;
+            b(row) = waypoints_[0](axis);
+            row++;
+
+            // vel at t=0: c1 = v0
+            A(row, seg_off + 1) = 1.0;
+            b(row) = start_vel_(axis);
+            row++;
+
+            // acc at t=0: 2*c2 = 0
+            A(row, seg_off + 2) = 2.0;
+            b(row) = 0.0;
+            row++;
+
+            // jerk at t=0: 6*c3 = 0
+            A(row, seg_off + 3) = 6.0;
+            b(row) = 0.0;
+            row++;
         }
-        if (!solveMinSnap1D(pos_axis, times, axis, traj)) {
+
+        // End boundary: p_{M-1}(T)=pos_end, p_{M-1}'(T)=v_end, p_{M-1}''(T)=0, p_{M-1}'''(T)=0
+        {
+            int seg_off = (M - 1) * N;
+            double T = durations[M - 1];
+            double T2 = T * T, T3 = T2 * T, T4 = T3 * T, T5 = T4 * T, T6 = T5 * T, T7 = T6 * T;
+
+            // pos at t=T
+            double tp[8] = {1, T, T2, T3, T4, T5, T6, T7};
+            for (int k = 0; k < N; ++k) A(row, seg_off + k) = tp[k];
+            b(row) = waypoints_[M](axis);
+            row++;
+
+            // vel at t=T
+            A(row, seg_off + 1) = 1.0;
+            A(row, seg_off + 2) = 2.0 * T;
+            A(row, seg_off + 3) = 3.0 * T2;
+            A(row, seg_off + 4) = 4.0 * T3;
+            A(row, seg_off + 5) = 5.0 * T4;
+            A(row, seg_off + 6) = 6.0 * T5;
+            A(row, seg_off + 7) = 7.0 * T6;
+            b(row) = end_vel_(axis);
+            row++;
+
+            // acc at t=T
+            A(row, seg_off + 2) = 2.0;
+            A(row, seg_off + 3) = 6.0 * T;
+            A(row, seg_off + 4) = 12.0 * T2;
+            A(row, seg_off + 5) = 20.0 * T3;
+            A(row, seg_off + 6) = 30.0 * T4;
+            A(row, seg_off + 7) = 42.0 * T5;
+            b(row) = 0.0;
+            row++;
+
+            // jerk at t=T
+            A(row, seg_off + 3) = 6.0;
+            A(row, seg_off + 4) = 24.0 * T;
+            A(row, seg_off + 5) = 60.0 * T2;
+            A(row, seg_off + 6) = 120.0 * T3;
+            A(row, seg_off + 7) = 210.0 * T4;
+            b(row) = 0.0;
+            row++;
+        }
+
+        // Interior waypoint and continuity conditions
+        for (int i = 0; i < M - 1; ++i) {
+            int seg_off_i = i * N;
+            int seg_off_j = (i + 1) * N;
+            double T = durations[i];
+            double T2 = T * T, T3 = T2 * T, T4 = T3 * T, T5 = T4 * T, T6 = T5 * T, T7 = T6 * T;
+            double tp[8] = {1, T, T2, T3, T4, T5, T6, T7};
+
+            // Position at end of segment i = waypoint[i+1]
+            for (int k = 0; k < N; ++k) A(row, seg_off_i + k) = tp[k];
+            b(row) = waypoints_[i + 1](axis);
+            row++;
+
+            // Position at start of segment i+1 = waypoint[i+1]
+            A(row, seg_off_j + 0) = 1.0;
+            b(row) = waypoints_[i + 1](axis);
+            row++;
+
+            // Velocity continuity: p_i'(T) = p_{i+1}'(0)
+            A(row, seg_off_i + 1) = 1.0;
+            A(row, seg_off_i + 2) = 2.0 * T;
+            A(row, seg_off_i + 3) = 3.0 * T2;
+            A(row, seg_off_i + 4) = 4.0 * T3;
+            A(row, seg_off_i + 5) = 5.0 * T4;
+            A(row, seg_off_i + 6) = 6.0 * T5;
+            A(row, seg_off_i + 7) = 7.0 * T6;
+            A(row, seg_off_j + 1) = -1.0;
+            b(row) = 0.0;
+            row++;
+
+            // Acceleration continuity: p_i''(T) = p_{i+1}''(0)
+            A(row, seg_off_i + 2) = 2.0;
+            A(row, seg_off_i + 3) = 6.0 * T;
+            A(row, seg_off_i + 4) = 12.0 * T2;
+            A(row, seg_off_i + 5) = 20.0 * T3;
+            A(row, seg_off_i + 6) = 30.0 * T4;
+            A(row, seg_off_i + 7) = 42.0 * T5;
+            A(row, seg_off_j + 2) = -2.0;
+            b(row) = 0.0;
+            row++;
+
+            // Jerk continuity: p_i'''(T) = p_{i+1}'''(0)
+            A(row, seg_off_i + 3) = 6.0;
+            A(row, seg_off_i + 4) = 24.0 * T;
+            A(row, seg_off_i + 5) = 60.0 * T2;
+            A(row, seg_off_i + 6) = 120.0 * T3;
+            A(row, seg_off_i + 7) = 210.0 * T4;
+            A(row, seg_off_j + 3) = -6.0;
+            b(row) = 0.0;
+            row++;
+
+            // Snap continuity: p_i''''(T) = p_{i+1}''''(0)
+            A(row, seg_off_i + 4) = 24.0;
+            A(row, seg_off_i + 5) = 120.0 * T;
+            A(row, seg_off_i + 6) = 360.0 * T2;
+            A(row, seg_off_i + 7) = 840.0 * T3;
+            A(row, seg_off_j + 4) = -24.0;
+            b(row) = 0.0;
+            row++;
+
+            // Crackle continuity (5th derivative): p_i^(5)(T) = p_{i+1}^(5)(0)
+            A(row, seg_off_i + 5) = 120.0;
+            A(row, seg_off_i + 6) = 720.0 * T;
+            A(row, seg_off_i + 7) = 2520.0 * T2;
+            A(row, seg_off_j + 5) = -120.0;
+            b(row) = 0.0;
+            row++;
+
+            // 6th derivative continuity
+            A(row, seg_off_i + 6) = 720.0;
+            A(row, seg_off_i + 7) = 5040.0 * T;
+            A(row, seg_off_j + 6) = -720.0;
+            b(row) = 0.0;
+            row++;
+        }
+
+        // Solve with Eigen (ColPivHouseholderQR for robustness)
+        Eigen::VectorXd c = A.colPivHouseholderQr().solve(b);
+
+        // Check solution quality
+        double residual = (A * c - b).norm();
+        if (residual > 1e-6) {
+            Warn("min-snap solve: large residual %.6e for axis %d\n", residual, axis);
             return false;
         }
+
+        // Extract coefficients into segment storage
+        for (int i = 0; i < M; ++i) {
+            for (int k = 0; k < N; ++k) {
+                segments_[i].coeffs(axis, k) = c(i * N + k);
+            }
+            segments_[i].duration = durations[i];
+        }
     }
+
+    trajectory_valid_ = true;
     return true;
 }
 
-// ============================================================================
-// plan
-// ============================================================================
-
-bool TrajectoryManager::plan(const Eigen::Vector3d& uav_pos, double t_actual)
-{
-    setStatus("Planning...");
-
-    // --- Read parameters from GUI ---
-    double max_vel  = max_velocity_->Value();
-    double max_acc  = max_acceleration_->Value();
-    double margin   = safety_margin_->Value();
-    double res      = grid_resolution_->Value();
-    int    n_wps    = static_cast<int>(num_waypoints_->Value());
-    int    n_obs    = static_cast<int>(num_obstacles_->Value());
-
-    if (max_vel  < 0.01) max_vel  = 0.1;
-    if (max_acc  < 0.01) max_acc  = 0.1;
-    if (margin   < 0.01) margin   = 0.05;
-    if (res      < 0.01) res      = 0.05;
-    if (n_wps    < 1)    n_wps    = 1;
-    if (n_wps    > kMaxWaypoints) n_wps = kMaxWaypoints;
-
-    // --- Collect waypoints (start = current UAV position) ---
-    std::vector<Eigen::Vector3d> waypoints;
-    waypoints.push_back(uav_pos);  // start
-    for (int i = 0; i < n_wps; ++i) {
-        double wx = wp_x_[i]->Value();
-        double wy = wp_y_[i]->Value();
-        double wz = wp_z_[i]->Value();
-        waypoints.push_back(Eigen::Vector3d(wx, wy, wz));
-    }
-
-    // --- Build occupancy grid (Phase 3 & 5) ---
-    // Determine grid bounds from waypoints + obstacles
-    Eigen::Vector3d grid_min = uav_pos;
-    Eigen::Vector3d grid_max = uav_pos;
-    for (size_t i = 1; i < waypoints.size(); ++i) {
-        grid_min = grid_min.cwiseMin(waypoints[i]);
-        grid_max = grid_max.cwiseMax(waypoints[i]);
-    }
-
-    // Prediction horizon for dynamic obstacles = total trajectory duration estimate
-    double total_dist = 0.0;
-    for (size_t i = 0; i + 1 < waypoints.size(); ++i) {
-        total_dist += (waypoints[i+1] - waypoints[i]).norm();
-    }
-    double horizon = total_dist / max_vel;
-
-    // Include predicted obstacle positions in grid bounds
-    int n_active_obs = (n_obs < num_tracked_obstacles_) ? n_obs : num_tracked_obstacles_;
-    for (int i = 0; i < n_active_obs; ++i) {
-        if (!obstacles_[i].initialized) continue;
-        Eigen::Vector3d pred = predictObstaclePos(i, horizon);
-        grid_min = grid_min.cwiseMin(pred);
-        grid_max = grid_max.cwiseMax(pred);
-    }
-
-    // Expand grid by margin + 1m padding
-    double pad = margin + 1.0;
-    grid_min -= Eigen::Vector3d(pad, pad, pad);
-    grid_max += Eigen::Vector3d(pad, pad, pad);
-
-    // Grid dimensions
-    Eigen::Vector3d grid_size = grid_max - grid_min;
-    int nx = static_cast<int>(std::ceil(grid_size.x() / res)) + 1;
-    int ny = static_cast<int>(std::ceil(grid_size.y() / res)) + 1;
-    int nz = static_cast<int>(std::ceil(grid_size.z() / res)) + 1;
-    if (nx < 1) nx = 1;
-    if (ny < 1) ny = 1;
-    if (nz < 1) nz = 1;
-
-    // Cap grid to prevent memory explosion on bad inputs
-    const int kMaxGridDim = 200;
-    if (nx > kMaxGridDim || ny > kMaxGridDim || nz > kMaxGridDim) {
-        setStatus("Error: grid too large — reduce resolution or reduce workspace");
-        return false;
-    }
-
-    uav_planning::OccupancyGrid3D grid(grid_min, nx, ny, nz, res);
-
-    // Add static obstacle spheres (current position)
-    for (int i = 0; i < n_active_obs; ++i) {
-        if (!obstacles_[i].initialized) continue;
-        grid.addSphereObstacle(obstacles_[i].position, margin);
-    }
-
-    // Add predicted obstacle positions (dynamic obstacles — Phase 5)
-    // We sample the prediction at several time steps and add inflated spheres
-    if (horizon > 0.01) {
-        const int kPredSteps = 5;
-        for (int i = 0; i < n_active_obs; ++i) {
-            if (!obstacles_[i].initialized) continue;
-            for (int s = 1; s <= kPredSteps; ++s) {
-                double dt = horizon * static_cast<double>(s) /
-                            static_cast<double>(kPredSteps);
-                Eigen::Vector3d pred = predictObstaclePos(i, dt);
-                // Inflate slightly more for future uncertainty
-                double inflated = margin * (1.0 + 0.2 * static_cast<double>(s));
-                grid.addSphereObstacle(pred, inflated);
-            }
+// ============================================================
+// Internal: Locate which segment a time t falls into
+// ============================================================
+int TrajectoryManager::LocateSegment(double t, double &t_local) const {
+    double accumulated = 0.0;
+    for (int i = 0; i < num_segments_; ++i) {
+        if (t <= accumulated + segments_[i].duration || i == num_segments_ - 1) {
+            t_local = t - accumulated;
+            if (t_local < 0.0) t_local = 0.0;
+            if (t_local > segments_[i].duration) t_local = segments_[i].duration;
+            return i;
         }
+        accumulated += segments_[i].duration;
     }
-
-    // --- Allocate segment times ---
-    std::vector<double> times = allocateTimes(waypoints, max_vel);
-    if (times.empty()) {
-        setStatus("Error: no segments");
-        return false;
-    }
-
-    // --- Solve minimum-snap trajectory ---
-    uav_planning::Trajectory<7> new_traj;
-    if (!solveMinSnap(waypoints, times, new_traj)) {
-        setStatus("Error: solver failed");
-        return false;
-    }
-
-    // --- Collision check (optional, diagnostic) ---
-    // Walk along the trajectory and check against the occupancy grid
-    bool collision_free = true;
-    double total_dur = new_traj.getTotalDuration();
-    const int kCheckSteps = 100;
-    for (int s = 0; s <= kCheckSteps && collision_free; ++s) {
-        double t = total_dur * static_cast<double>(s) /
-                   static_cast<double>(kCheckSteps);
-        Eigen::Vector3d p = new_traj.getPos(t);
-        if (grid.isOccupied(p)) {
-            collision_free = false;
-        }
-    }
-
-    if (!collision_free) {
-        // Warn but still accept the trajectory — in a real corridor planner
-        // the QP constraints would enforce collision freedom.  For the
-        // waypoint mode we log a warning and proceed.
-        Warn("trajectory may collide with obstacles\n");
-        setStatus("Planned (collision warning)");
-    } else {
-        setStatus("Planned OK");
-    }
-
-    // Store in pending then swap to active
-    pending_trajectory_ = new_traj;
-    active_trajectory_  = pending_trajectory_;
-    trajectory_valid_   = true;
-    plan_start_pos_     = uav_pos;
-    last_replan_time_   = t_actual;
-
-    Info("planned %.2f s trajectory (%d segs)\n",
-         total_dur,
-         static_cast<int>(waypoints.size()) - 1);
-    return true;
+    t_local = segments_[num_segments_ - 1].duration;
+    return num_segments_ - 1;
 }
 
-// ============================================================================
-// update — called every control loop iteration
-// ============================================================================
+// ============================================================
+// Internal: Evaluate trajectory at time t
+// ============================================================
+// p(t) = c0 + c1*t + c2*t^2 + c3*t^3 + c4*t^4 + c5*t^5 + c6*t^6 + c7*t^7
+// Using Horner's method for efficiency:
+// p(t) = c0 + t*(c1 + t*(c2 + t*(c3 + t*(c4 + t*(c5 + t*(c6 + t*c7))))))
 
-void TrajectoryManager::update(float t_actual_f,
-                                const flair::core::Vector3Df& uav_pos_flair)
-{
-    double t_actual = static_cast<double>(t_actual_f);
-    Eigen::Vector3d uav_pos(static_cast<double>(uav_pos_flair.x),
-                             static_cast<double>(uav_pos_flair.y),
-                             static_cast<double>(uav_pos_flair.z));
+Eigen::Vector3d TrajectoryManager::EvalPos(double t) const {
+    if (!trajectory_valid_ || num_segments_ < 1) return Eigen::Vector3d::Zero();
 
-    // Phase 3: update obstacle tracking every iteration
-    updateObstacles(t_actual);
+    double t_local;
+    int seg = LocateSegment(t, t_local);
+    const Eigen::Matrix<double, 3, 8> &c = segments_[seg].coeffs;
 
-    // --- Button: Plan ---
-    if (btn_plan_->Clicked()) {
-        // Can plan from any state
-        state_ = State::PLANNING;
-        bool ok = plan(uav_pos, t_actual);
-        if (ok) {
-            state_ = State::PLANNED;
-        } else {
-            state_ = State::IDLE;
-            setStatus("Error: planning failed");
-        }
+    // Horner evaluation
+    Eigen::Vector3d result = c.col(7);
+    for (int k = 6; k >= 0; --k) {
+        result = result * t_local + c.col(k);
     }
-
-    // --- Button: Execute ---
-    if (btn_execute_->Clicked()) {
-        if (trajectory_valid_) {
-            if (state_ == State::PLANNED || state_ == State::IDLE) {
-                state_ = State::EXECUTING;
-                execution_start_time_ = t_actual;
-                last_replan_time_     = t_actual;
-                setStatus("Executing");
-                Info("execution started\n");
-            }
-        } else {
-            setStatus("Error: no trajectory (press Plan first)");
-        }
-    }
-
-    // --- Button: Stop ---
-    if (btn_stop_->Clicked()) {
-        stop();
-        return;
-    }
-
-    // --- Trajectory end detection ---
-    if (state_ == State::EXECUTING && trajectory_valid_) {
-        double elapsed = t_actual - execution_start_time_;
-        double total   = active_trajectory_.getTotalDuration();
-        if (elapsed >= total) {
-            setStatus("Trajectory complete");
-            state_ = State::IDLE;
-            Info("trajectory complete\n");
-            return;
-        }
-    }
-
-    // --- Phase 4: Receding-horizon replanning ---
-    if (state_ == State::EXECUTING) {
-        double replan_dt = replan_period_->Value();
-        if (replan_dt < 0.1) replan_dt = 0.5;
-        double since_last = t_actual - last_replan_time_;
-
-        if (since_last >= replan_dt) {
-            // Time to replan
-            state_ = State::REPLANNING;
-            setStatus("Replanning...");
-
-            // Determine the current point on trajectory as new start
-            double elapsed = t_actual - execution_start_time_;
-            double total   = active_trajectory_.getTotalDuration();
-            if (elapsed >= total) elapsed = total;
-            // Current desired position from active trajectory
-            Eigen::Vector3d traj_pos = active_trajectory_.getPos(elapsed);
-            // Use actual UAV position as start for replanning
-            bool ok = plan(uav_pos, t_actual);
-            if (ok) {
-                // Swap trajectory and reset execution clock
-                execution_start_time_ = t_actual;
-                state_ = State::EXECUTING;
-                setStatus("Executing (replanned)");
-            } else {
-                // Keep old trajectory — add a safety extension if near end
-                Warn("replanning failed, continuing old trajectory\n");
-                state_ = State::EXECUTING;
-                setStatus("Executing (replan failed)");
-                last_replan_time_ = t_actual; // reset timer to avoid busy loop
-            }
-        }
-    }
+    return result;
 }
 
-// ============================================================================
-// evaluate
-// ============================================================================
+Eigen::Vector3d TrajectoryManager::EvalVel(double t) const {
+    if (!trajectory_valid_ || num_segments_ < 1) return Eigen::Vector3d::Zero();
 
-bool TrajectoryManager::evaluate(float t_actual,
-                                  flair::core::Vector3Df& xid,
-                                  flair::core::Vector3Df& xidp,
-                                  flair::core::Vector3Df& xidpp,
-                                  flair::core::Vector3Df& xidppp)
-{
-    if (state_ != State::EXECUTING && state_ != State::REPLANNING) {
-        return false;
-    }
-    if (!trajectory_valid_) {
-        return false;
-    }
+    double t_local;
+    int seg = LocateSegment(t, t_local);
+    const Eigen::Matrix<double, 3, 8> &c = segments_[seg].coeffs;
 
-    double elapsed = static_cast<double>(t_actual) - execution_start_time_;
-    double total   = active_trajectory_.getTotalDuration();
-
-    // Clamp to valid range
-    if (elapsed < 0.0)    elapsed = 0.0;
-    if (elapsed >= total) elapsed = total;
-
-    // Evaluate position through jerk
-    Eigen::Vector3d p = active_trajectory_.getPos(elapsed);
-    Eigen::Vector3d v = active_trajectory_.getVel(elapsed);
-    Eigen::Vector3d a = active_trajectory_.getAcc(elapsed);
-    Eigen::Vector3d j = active_trajectory_.getJer(elapsed);
-
-    // Convert Eigen::Vector3d -> flair::core::Vector3Df
-    xid    = flair::core::Vector3Df(static_cast<float>(p.x()),
-                                     static_cast<float>(p.y()),
-                                     static_cast<float>(p.z()));
-    xidp   = flair::core::Vector3Df(static_cast<float>(v.x()),
-                                     static_cast<float>(v.y()),
-                                     static_cast<float>(v.z()));
-    xidpp  = flair::core::Vector3Df(static_cast<float>(a.x()),
-                                     static_cast<float>(a.y()),
-                                     static_cast<float>(a.z()));
-    xidppp = flair::core::Vector3Df(static_cast<float>(j.x()),
-                                     static_cast<float>(j.y()),
-                                     static_cast<float>(j.z()));
-    return true;
+    // p'(t) = c1 + 2*c2*t + 3*c3*t^2 + 4*c4*t^3 + 5*c5*t^4 + 6*c6*t^5 + 7*c7*t^6
+    Eigen::Vector3d result = 7.0 * c.col(7);
+    result = result * t_local + 6.0 * c.col(6);
+    result = result * t_local + 5.0 * c.col(5);
+    result = result * t_local + 4.0 * c.col(4);
+    result = result * t_local + 3.0 * c.col(3);
+    result = result * t_local + 2.0 * c.col(2);
+    result = result * t_local + 1.0 * c.col(1);
+    return result;
 }
 
-// ============================================================================
-// isExecuting
-// ============================================================================
+Eigen::Vector3d TrajectoryManager::EvalAcc(double t) const {
+    if (!trajectory_valid_ || num_segments_ < 1) return Eigen::Vector3d::Zero();
 
-bool TrajectoryManager::isExecuting() const
-{
-    return (state_ == State::EXECUTING || state_ == State::REPLANNING);
+    double t_local;
+    int seg = LocateSegment(t, t_local);
+    const Eigen::Matrix<double, 3, 8> &c = segments_[seg].coeffs;
+
+    // p''(t) = 2*c2 + 6*c3*t + 12*c4*t^2 + 20*c5*t^3 + 30*c6*t^4 + 42*c7*t^5
+    Eigen::Vector3d result = 42.0 * c.col(7);
+    result = result * t_local + 30.0 * c.col(6);
+    result = result * t_local + 20.0 * c.col(5);
+    result = result * t_local + 12.0 * c.col(4);
+    result = result * t_local + 6.0 * c.col(3);
+    result = result * t_local + 2.0 * c.col(2);
+    return result;
 }
 
-// ============================================================================
-// stop
-// ============================================================================
+Eigen::Vector3d TrajectoryManager::EvalJer(double t) const {
+    if (!trajectory_valid_ || num_segments_ < 1) return Eigen::Vector3d::Zero();
 
-void TrajectoryManager::stop()
-{
-    state_ = State::IDLE;
-    setStatus("Stopped");
-    Info("stopped\n");
+    double t_local;
+    int seg = LocateSegment(t, t_local);
+    const Eigen::Matrix<double, 3, 8> &c = segments_[seg].coeffs;
+
+    // p'''(t) = 6*c3 + 24*c4*t + 60*c5*t^2 + 120*c6*t^3 + 210*c7*t^4
+    Eigen::Vector3d result = 210.0 * c.col(7);
+    result = result * t_local + 120.0 * c.col(6);
+    result = result * t_local + 60.0 * c.col(5);
+    result = result * t_local + 24.0 * c.col(4);
+    result = result * t_local + 6.0 * c.col(3);
+    return result;
 }

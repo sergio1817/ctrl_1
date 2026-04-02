@@ -18,10 +18,8 @@
 #include <VrpnClient.h>
 #include "Sliding.h"
 #include "Sliding_pos.h"
-//#include "Sliding_force.h"
-
-// Trajectory manager (Phases 2-5)
 #include "TrajectoryManager.h"
+//#include "Sliding_force.h"
 
 
 namespace flair {
@@ -86,6 +84,8 @@ class ctrl1 : public flair::meta::UavStateMachine {
         flair::filter::Sliding_pos *u_sliding_pos;
         //flair::filter::Sliding_force *u_sliding_force;
 
+        TrajectoryManager *traj_manager_;
+
         flair::meta::MetaVrpnObject *uavVrpn;
         flair::sensor::VrpnClient *vrpnclient;
         
@@ -107,9 +107,6 @@ class ctrl1 : public flair::meta::UavStateMachine {
         flair::gui::Label *lfx, *lfy, *lfz;
 
         flair::core::AhrsData *customReferenceOrientation,*customOrientation;
-
-        // ---- Trajectory Manager (Phases 2-5) ----
-        TrajectoryManager* traj_manager_;
         
 };
 

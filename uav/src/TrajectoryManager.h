@@ -1,241 +1,285 @@
-// TrajectoryManager.h
-//
-// Manages the trajectory planning lifecycle for ctrl_1 (Flair UAV controller).
-// Handles: GUI configuration, obstacle VRPN tracking, replanning, trajectory evaluation.
-//
-// Phases 2-5 of the trajectory integration roadmap.
-//
-// C++11 / GCC 4.9 compatible — no C++14/17 features.
-// Flair SDK + Eigen 3.3.x/3.4.x.
+// %flair:license{
+// This file is part of the Flair framework distributed under the
+// CECILL-C License, Version 1.0.
+// %flair:license}
+/*!
+ * \file TrajectoryManager.h
+ * \brief IODevice-based trajectory planner with min-snap optimization
+ * \author Sergio Urzua, Copyright Heudiasyc UMR UTC/CNRS 7253
+ * \date 2024
+ * \version 2.0
+ */
 
 #ifndef TRAJECTORY_MANAGER_H
 #define TRAJECTORY_MANAGER_H
 
-#include <string>
+#include <IODevice.h>
+#include <Vector3D.h>
+#include <Eigen/Core>
 #include <vector>
+#include <string>
 
-// Eigen
-#include <Eigen/Dense>
-
-// Flair core — inherit from Object so we get Info/Warn/Err macros
-#include <Object.h>
-#include <Vector3D.h>    // flair::core::Vector3Df
-
-// Trajectory planner
-#include "trajectory_planner/trajectory.hpp"
-#include "trajectory_planner/occupancy_grid.hpp"
-
-// Forward declarations — Flair GUI
 namespace flair {
+    namespace core {
+        class Matrix;
+        class io_data;
+        class Time;
+    }
     namespace gui {
-        class GroupBox;
+        class LayoutPosition;
         class DoubleSpinBox;
+        class SpinBox;
         class PushButton;
         class ComboBox;
+        class GroupBox;
         class Label;
-        class Tab;
-        class TabWidget;
-    }
-    namespace sensor {
-        class VrpnClient;
-    }
-    namespace meta {
-        class MetaVrpnObject;
+        class DataPlot1D;
+        class DataPlot2D;
     }
 }
 
-// ============================================================================
-// TrajectoryManager
-// ============================================================================
-
-class TrajectoryManager : public flair::core::Object {
+/*!
+ * \class TrajectoryManager
+ * \brief Trajectory planner IODevice following Flair patterns
+ *
+ * Inherits from IODevice like TrajectoryGenerator2DCircle.
+ * Provides min-snap trajectory generation with obstacle avoidance.
+ * Outputs a 13-row Matrix: des_x/y/z, des_vx/vy/vz, des_ax/ay/az,
+ * des_jx/jy/jz, and trajectory progress (0..1).
+ *
+ * Usage from ctrl1:
+ *   traj_manager_ = new TrajectoryManager(positiongTab->NewRow(), "Trajectory Planner");
+ *   // In control loop:
+ *   traj_manager_->Update(GetTime());
+ *   traj_manager_->GetPosition(xid);
+ *   traj_manager_->GetSpeed(xidp);
+ */
+class TrajectoryManager : public flair::core::IODevice {
 public:
-    // -----------------------------------------------------------------------
-    // State machine
-    // -----------------------------------------------------------------------
-    enum class State {
-        IDLE,        ///< No trajectory, waiting for Plan
-        PLANNING,    ///< Plan requested, computing (inline/synchronous)
-        PLANNED,     ///< Trajectory computed, waiting for Execute
-        EXECUTING,   ///< Tracking active trajectory
-        REPLANNING   ///< Recomputing trajectory while executing (inline)
-    };
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-    // -----------------------------------------------------------------------
-    // Per-obstacle data (VRPN + state estimation)
-    // -----------------------------------------------------------------------
-    struct ObstacleState {
-        flair::meta::MetaVrpnObject* vrpn;   ///< Flair VRPN object
-        Eigen::Vector3d position;            ///< Current position (m)
-        Eigen::Vector3d velocity;            ///< Estimated velocity (m/s), low-pass filtered
-        Eigen::Vector3d prev_position;       ///< Previous position for differentiation
-        double prev_time;                    ///< Time of previous update (s)
-        bool initialized;                    ///< Whether first measurement received
+    /*!
+     * \brief Constructor following Flair IODevice pattern
+     * \param position Layout position for GUI widgets
+     * \param name Object name
+     */
+    TrajectoryManager(const flair::gui::LayoutPosition *position, std::string name);
 
-        ObstacleState()
-            : vrpn(0)
-            , position(Eigen::Vector3d::Zero())
-            , velocity(Eigen::Vector3d::Zero())
-            , prev_position(Eigen::Vector3d::Zero())
-            , prev_time(0.0)
-            , initialized(false)
-        {}
-    };
-
-    // -----------------------------------------------------------------------
-    // Constructor / Destructor
-    // -----------------------------------------------------------------------
-
-    /// @param parent   GroupBox in which all trajectory GUI widgets are placed.
-    ///                 Typically the "Setup trajectory" GroupBox from ctrl1.
-    /// The GroupBox acts as the Flair parent Object.
-    explicit TrajectoryManager(flair::gui::GroupBox* parent);
-
+    /*!
+     * \brief Destructor
+     */
     ~TrajectoryManager();
 
-    // -----------------------------------------------------------------------
-    // Initialisation
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------
+    // Trajectory evaluation (like TrajectoryGenerator2DCircle)
+    // -------------------------------------------------------
 
-    /// Add a VRPN obstacle tracker. Call once per obstacle in ctrl1 constructor
-    /// after vrpnclient->Start(). @p name must match the Motive rigid body name.
-    void addObstacleVrpn(const std::string& name,
-                         flair::sensor::VrpnClient* client);
+    /*!
+     * \brief Evaluate trajectory at given time, update output matrix
+     * \param time Current Flair time in nanoseconds
+     *
+     * Evaluates the active trajectory, writes to the output matrix using
+     * GetMutex/SetValueNoMutex/ReleaseMutex, then calls ProcessUpdate.
+     */
+    void Update(flair::core::Time time);
 
-    // -----------------------------------------------------------------------
-    // Real-time interface (called every control loop iteration)
-    // -----------------------------------------------------------------------
+    /*!
+     * \brief Get current desired position
+     * \param pos Output position vector
+     */
+    void GetPosition(flair::core::Vector3Df &pos) const;
 
-    /// Called every control loop. Checks buttons, updates obstacles, handles
-    /// replanning timer. @p uav_pos is the current UAV position in world frame.
-    void update(float t_actual, const flair::core::Vector3Df& uav_pos);
+    /*!
+     * \brief Get current desired velocity
+     * \param vel Output velocity vector
+     */
+    void GetSpeed(flair::core::Vector3Df &vel) const;
 
-    /// Evaluate the active trajectory at global time @p t_actual.
-    ///
-    /// @param[out] xid     Desired position
-    /// @param[out] xidp    Desired velocity
-    /// @param[out] xidpp   Desired acceleration
-    /// @param[out] xidppp  Desired jerk
-    /// @return true if trajectory is active and outputs have been filled;
-    ///         false if not executing (caller should fall back to regulation).
-    bool evaluate(float t_actual,
-                  flair::core::Vector3Df& xid,
-                  flair::core::Vector3Df& xidp,
-                  flair::core::Vector3Df& xidpp,
-                  flair::core::Vector3Df& xidppp);
+    /*!
+     * \brief Get current desired acceleration
+     * \param acc Output acceleration vector
+     */
+    void GetAcceleration(flair::core::Vector3Df &acc) const;
 
-    /// True while a trajectory is being tracked.
-    bool isExecuting() const;
+    /*!
+     * \brief Get current desired jerk
+     * \param jerk Output jerk vector
+     */
+    void GetJerk(flair::core::Vector3Df &jerk) const;
 
-    /// Immediately stop trajectory tracking (resets to IDLE).
-    void stop();
+    /*!
+     * \brief Get output matrix (for external DataPlot wiring)
+     * \return Pointer to the 13x1 output matrix
+     */
+    flair::core::Matrix *GetMatrix() const;
 
-    // -----------------------------------------------------------------------
-    // State query
-    // -----------------------------------------------------------------------
-    State getState() const { return state_; }
+    // -------------------------------------------------------
+    // Planning interface
+    // -------------------------------------------------------
+
+    /*!
+     * \brief Plan a trajectory from current position to waypoints
+     * \param current_pos Current UAV position
+     * \param current_vel Current UAV velocity
+     * \return true if planning succeeded
+     */
+    bool Plan(const flair::core::Vector3Df &current_pos,
+              const flair::core::Vector3Df &current_vel);
+
+    /*!
+     * \brief Replan trajectory (receding horizon)
+     * \param current_pos Current UAV position
+     * \param current_vel Current UAV velocity
+     * \return true if replanning succeeded
+     */
+    bool Replan(const flair::core::Vector3Df &current_pos,
+                const flair::core::Vector3Df &current_vel);
+
+    // -------------------------------------------------------
+    // Lifecycle (like TrajectoryGenerator2DCircle)
+    // -------------------------------------------------------
+
+    /*!
+     * \brief Start trajectory execution
+     */
+    void StartTraj();
+
+    /*!
+     * \brief Stop trajectory immediately
+     */
+    void StopTraj();
+
+    /*!
+     * \brief Check if trajectory is currently executing
+     */
+    bool IsRunning() const;
+
+    /*!
+     * \brief Get trajectory progress (0.0 to 1.0)
+     */
+    float GetProgress() const;
+
+    // -------------------------------------------------------
+    // Obstacle management
+    // -------------------------------------------------------
+
+    /*!
+     * \brief Add a spherical obstacle
+     * \param pos Obstacle center position
+     * \param radius Obstacle radius
+     */
+    void AddObstacle(const flair::core::Vector3Df &pos, float radius);
+
+    /*!
+     * \brief Clear all obstacles
+     */
+    void ClearObstacles();
+
+    /*!
+     * \brief Update obstacle position
+     * \param idx Obstacle index
+     * \param pos New position
+     */
+    void UpdateObstaclePosition(int idx, const flair::core::Vector3Df &pos);
+
+    /*!
+     * \brief Update obstacle velocity (for prediction)
+     * \param idx Obstacle index
+     * \param vel Obstacle velocity
+     */
+    void UpdateObstacleVelocity(int idx, const flair::core::Vector3Df &vel);
 
 private:
-    // -----------------------------------------------------------------------
+    /*!
+     * \brief UpdateFrom override - empty (same as TrajectoryGenerator2DCircle)
+     *
+     * TrajectoryManager does not receive upstream data through the IODevice
+     * chain. Update() is called explicitly from the control loop.
+     */
+    void UpdateFrom(const flair::core::io_data *data) {}
+
+    // State machine
+    enum class State : uint8_t {
+        IDLE,
+        PLANNING,
+        PLANNED,
+        EXECUTING,
+        REPLANNING
+    };
+
+    State state_;
+
+    // Output matrix (13x1): pos(3), vel(3), acc(3), jerk(3), progress(1)
+    flair::core::Matrix *output_matrix_;
+
+    // Cached trajectory state for GetPosition/GetSpeed/etc accessors
+    flair::core::Vector3Df last_pos_;
+    flair::core::Vector3Df last_vel_;
+    flair::core::Vector3Df last_acc_;
+    flair::core::Vector3Df last_jerk_;
+    float progress_;
+
+    // Trajectory storage (polynomial coefficients per segment)
+    // Each segment: 3 x (ORDER+1) coefficient matrix, duration
+    static const int POLY_ORDER = 7;  // min-snap = degree 7
+    static const int MAX_SEGMENTS = 6;
+    static const int MAX_WAYPOINTS = 7;  // MAX_SEGMENTS + 1
+    static const int COEFFS_PER_SEG = POLY_ORDER + 1;  // 8
+
+    struct TrajectorySegment {
+        Eigen::Matrix<double, 3, 8> coeffs;  // 3 x (ORDER+1)
+        double duration;
+        TrajectorySegment() : coeffs(Eigen::Matrix<double, 3, 8>::Zero()), duration(0.0) {}
+    };
+
+    int num_segments_;
+    TrajectorySegment segments_[MAX_SEGMENTS];
+    double total_duration_;
+    bool trajectory_valid_;
+
+    // Timing
+    double execution_start_time_;  // in seconds (from Flair Time)
+    double last_replan_time_;
+
+    // Waypoints (set via GUI or programmatically)
+    int num_waypoints_;
+    Eigen::Vector3d waypoints_[MAX_WAYPOINTS];
+    Eigen::Vector3d start_vel_;
+    Eigen::Vector3d end_vel_;
+
+    // Obstacle list
+    struct Obstacle {
+        Eigen::Vector3d pos;
+        Eigen::Vector3d vel;
+        double radius;
+    };
+    static const int MAX_OBSTACLES = 16;
+    int num_obstacles_;
+    Obstacle obstacles_[MAX_OBSTACLES];
+
     // GUI widgets
-    // -----------------------------------------------------------------------
+    flair::gui::GroupBox *settings_box_;
+    flair::gui::DoubleSpinBox *max_vel_;
+    flair::gui::DoubleSpinBox *max_acc_;
+    flair::gui::DoubleSpinBox *safety_margin_;
+    flair::gui::DoubleSpinBox *replan_period_;
+    flair::gui::SpinBox *num_wp_spin_;
+    flair::gui::DoubleSpinBox *wp_x_[MAX_WAYPOINTS];
+    flair::gui::DoubleSpinBox *wp_y_[MAX_WAYPOINTS];
+    flair::gui::DoubleSpinBox *wp_z_[MAX_WAYPOINTS];
+    flair::gui::PushButton *plan_button_;
+    flair::gui::PushButton *execute_button_;
+    flair::gui::PushButton *stop_button_;
+    flair::gui::Label *status_label_;
 
-    // -- Planner parameters --
-    flair::gui::ComboBox*    planner_mode_;      ///< Waypoint / Corridor
-    flair::gui::DoubleSpinBox* safety_margin_;   ///< m, obstacle inflation radius
-    flair::gui::DoubleSpinBox* max_velocity_;    ///< m/s
-    flair::gui::DoubleSpinBox* max_acceleration_;///< m/s^2
-    flair::gui::DoubleSpinBox* grid_resolution_; ///< m, occupancy grid voxel size
-    flair::gui::DoubleSpinBox* replan_period_;   ///< s, receding-horizon period
-
-    // -- Waypoints (up to 5, each with x/y/z spinboxes) --
-    static const int kMaxWaypoints = 5;
-    flair::gui::DoubleSpinBox* wp_x_[kMaxWaypoints];
-    flair::gui::DoubleSpinBox* wp_y_[kMaxWaypoints];
-    flair::gui::DoubleSpinBox* wp_z_[kMaxWaypoints];
-
-    flair::gui::DoubleSpinBox* num_waypoints_;   ///< 1..5
-    flair::gui::DoubleSpinBox* num_obstacles_;   ///< 0..5
-
-    // -- Control buttons --
-    flair::gui::PushButton* btn_plan_;
-    flair::gui::PushButton* btn_execute_;
-    flair::gui::PushButton* btn_stop_;
-
-    // -- Status label --
-    flair::gui::Label* status_label_;
-
-    // -----------------------------------------------------------------------
-    // Obstacles
-    // -----------------------------------------------------------------------
-    static const int kMaxObstacles = 5;
-    ObstacleState obstacles_[kMaxObstacles];
-    int num_tracked_obstacles_;       ///< How many obstacles are actually registered
-
-    // -----------------------------------------------------------------------
-    // Trajectory storage (double-buffer, synchronous — no threads needed)
-    // -----------------------------------------------------------------------
-    uav_planning::Trajectory<7> active_trajectory_;   ///< Currently tracked
-    uav_planning::Trajectory<7> pending_trajectory_;  ///< Being prepared
-
-    bool trajectory_valid_;     ///< active_trajectory_ contains a valid trajectory
-
-    // -----------------------------------------------------------------------
-    // Execution state
-    // -----------------------------------------------------------------------
-    State  state_;
-    double execution_start_time_;  ///< t_actual when Execute was clicked
-    double last_replan_time_;      ///< t_actual of last (re)plan
-
-    // Cached UAV position at plan time (for occupancy grid construction)
-    Eigen::Vector3d plan_start_pos_;
-
-    // -----------------------------------------------------------------------
-    // Private helpers
-    // -----------------------------------------------------------------------
-
-    /// Build occupancy grid and run the planner. @p uav_pos is current UAV
-    /// world position. @p t_actual is current time in seconds.
-    /// @return true on success.
-    bool plan(const Eigen::Vector3d& uav_pos, double t_actual);
-
-    /// Update all tracked obstacle positions/velocities from VRPN.
-    void updateObstacles(double t_actual);
-
-    /// Predict obstacle world position @p dt seconds into the future.
-    Eigen::Vector3d predictObstaclePos(int idx, double dt) const;
-
-    /// Set the status label text.
-    void setStatus(const std::string& text);
-
-    /// Allocate segment times proportional to Euclidean distance.
-    /// Returns a vector of durations (one per segment, N-1 for N waypoints).
-    std::vector<double> allocateTimes(
-        const std::vector<Eigen::Vector3d>& wps,
-        double max_vel) const;
-
-    /// Build a minimum-snap trajectory from waypoints using the occupancy grid.
-    /// Uses simple direct polynomial approach (no corridor):
-    ///   - allocate times proportional to distance / max_vel
-    ///   - solve minimum-snap QP per axis
-    /// Stores result in @p traj. Returns true on success.
-    bool solveMinSnap(const std::vector<Eigen::Vector3d>& waypoints,
-                      const std::vector<double>& times,
-                      uav_planning::Trajectory<7>& traj);
-
-    /// Solve 1-D minimum-snap QP for a single axis.
-    /// @param pos   Waypoint positions for this axis (N values, N-1 segments)
-    /// @param times Segment durations (N-1 values)
-    /// @param[out] traj  Output trajectory pieces for this axis (coefficients row 0)
-    /// @return true on success
-    bool solveMinSnap1D(const std::vector<double>& pos,
-                        const std::vector<double>& times,
-                        int axis,
-                        uav_planning::Trajectory<7>& traj);
-
-    // Non-copyable
-    TrajectoryManager(const TrajectoryManager&);
-    TrajectoryManager& operator=(const TrajectoryManager&);
+    // Internal helpers
+    void ReadWaypointsFromGUI();
+    bool SolveMinSnap();
+    int LocateSegment(double t, double &t_local) const;
+    Eigen::Vector3d EvalPos(double t) const;
+    Eigen::Vector3d EvalVel(double t) const;
+    Eigen::Vector3d EvalAcc(double t) const;
+    Eigen::Vector3d EvalJer(double t) const;
 };
 
 #endif // TRAJECTORY_MANAGER_H

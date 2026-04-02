@@ -14,6 +14,7 @@
 #include "ctrl1.h"
 #include "Sliding.h"
 #include "Sliding_pos.h"
+#include "TrajectoryManager.h"
 //#include "TargetJR3.h"
 //#include "Sliding_force.h"
 //#include "MetaJR3.h"
@@ -39,9 +40,6 @@
 #include <TabWidget.h>
 //#include <cmath>
 
-// Trajectory manager
-#include "TrajectoryManager.h"
-
 using namespace std;
 using namespace flair::core;
 using namespace flair::gui;
@@ -55,8 +53,7 @@ ctrl1::ctrl1(TargetController *controller)
             behaviourMode(BehaviourMode_t::Default),
             vrpnLost(false),
             uavVrpn(nullptr),
-            vrpnclient(nullptr),
-            traj_manager_(nullptr) {
+            vrpnclient(nullptr) {
     Uav* uav=GetUav();
 
     // std::string ip_dir;
@@ -123,6 +120,9 @@ ctrl1::ctrl1(TargetController *controller)
     GroupBox *regbox = new GroupBox(positionTab->NewRow(), "Setup regulation");
     GroupBox *trackbox = new GroupBox(positionTab->NewRow(), "Setup tracking");
     GroupBox *trajbox = new GroupBox(positionTab->NewRow(), "Setup trajectory");
+
+    // Trajectory planner (IODevice, creates its own GUI and DataPlots)
+    traj_manager_ = new TrajectoryManager(trajbox->NewRow(), "Trajectory Planner");
 
     position_behavior = new ComboBox(posbox->NewRow(),"Select behavior");
     position_behavior->AddItem("Regulation");
@@ -219,24 +219,6 @@ ctrl1::ctrl1(TargetController *controller)
     
     customOrientation=new AhrsData(this,"orientation");
 
-    // ---- TrajectoryManager initialisation (Phase 2) ----
-    // trajbox is the "Setup trajectory" GroupBox created above.
-    // TrajectoryManager creates all its own GUI widgets inside trajbox.
-    traj_manager_ = new TrajectoryManager(trajbox);
-
-    // ---- Obstacle VRPN tracking (Phase 3) ----
-    // Register obstacle rigid bodies based on the num_obstacles GUI spinbox.
-    // The GUI spinbox default is 0; the user can change it and restart the app,
-    // or we dynamically add up to 5.  We register all 5 possible names here;
-    // TrajectoryManager::update() will only poll the num_obstacles_->Value() active ones.
-    {
-        const char* obs_names[5] = {
-            "obstacle1", "obstacle2", "obstacle3", "obstacle4", "obstacle5"
-        };
-        for (int i = 0; i < 5; ++i) {
-            traj_manager_->addObstacleVrpn(obs_names[i], vrpnclient);
-        }
-    }
 
     // Tab *lawTab3 = new Tab(getFrameworkManager()->GetTabWidget(), "Force");
     // TabWidget *tabWidget3 = new TabWidget(lawTab3->NewRow(), "laws");
@@ -335,6 +317,7 @@ ctrl1::ctrl1(TargetController *controller)
     AddDeviceToControlLawLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding_pos);
     //AddDeviceToControlLawLog(u_sliding_force);
+    getFrameworkManager()->AddDeviceToLog(traj_manager_);
 
 
 }
@@ -345,20 +328,18 @@ ctrl1::~ctrl1() {
         delete u_sliding; 
         u_sliding = nullptr; 
     }
-    if (u_sliding_pos != nullptr) { 
-        delete u_sliding_pos; 
-        u_sliding_pos = nullptr; 
+    if (u_sliding_pos != nullptr) {
+        delete u_sliding_pos;
+        u_sliding_pos = nullptr;
+    }
+    if (traj_manager_ != nullptr) {
+        delete traj_manager_;
+        traj_manager_ = nullptr;
     }
     //if (u_sliding_force != nullptr) { 
     //    delete u_sliding_force; 
     //    u_sliding_force = nullptr; 
     //}
-
-    // TrajectoryManager
-    if (traj_manager_ != nullptr) {
-        delete traj_manager_;
-        traj_manager_ = nullptr;
-    }
 
     // delete VRPN objects if they were created
     if (uavVrpn != nullptr) {
@@ -465,10 +446,6 @@ void ctrl1::SignalEvent(Event_t event) {
         //first_update==true;
         vrpnLost=false;
         behaviourMode=BehaviourMode_t::Default;
-        // Stop trajectory tracking on landing
-        if (traj_manager_ != nullptr) {
-            traj_manager_->stop();
-        }
         break;
     case Event_t::EnteringFailSafeMode:
         l2->SetText("Control: off");
@@ -476,10 +453,6 @@ void ctrl1::SignalEvent(Event_t event) {
         //first_update==true;
         vrpnLost=false;
         behaviourMode=BehaviourMode_t::Default;
-        // Stop trajectory tracking on failsafe
-        if (traj_manager_ != nullptr) {
-            traj_manager_->stop();
-        }
         break;
     default:
         break;
@@ -494,28 +467,6 @@ void ctrl1::ExtraCheckPushButton(void) {
 
     if(stop_prueba1->Clicked() && (behaviourMode==BehaviourMode_t::Custom)) {
         Stopctrl1();
-    }
-
-    // Trajectory manager button checks (Plan, Execute, Stop) are handled
-    // inside TrajectoryManager::update(), which is called from sliding_ctrl_pos().
-    // ExtraCheckPushButton() runs in the same real-time loop iteration, so we
-    // also call update() here when NOT in position-control mode (e.g. user is
-    // browsing the GUI while the UAV is on the ground or in default mode).
-    // This allows Plan to work before starting control.
-    if (behaviourMode != BehaviourMode_t::Custom ||
-        control_select->CurrentIndex() != 1) {
-        // We need the current UAV position to pass to update()
-        if (traj_manager_ != nullptr) {
-            Vector3Df uav_pos_now;
-            if (uavVrpn != nullptr && uavVrpn->IsTracked(500)) {
-                uavVrpn->GetPosition(uav_pos_now);
-            }
-            // Use time from u_sliding_pos->t0 baseline (same as sliding_ctrl_pos)
-            float t_now = static_cast<float>(
-                (static_cast<double>(GetTime()) / 1000000000.0) -
-                u_sliding_pos->t0);
-            traj_manager_->update(t_now, uav_pos_now);
-        }
     }
 }
 
@@ -577,10 +528,6 @@ void ctrl1::Stopctrl1(void) {
     SetThrustMode(ThrustMode_t::Default);
     behaviourMode=BehaviourMode_t::Default;
     EnterFailSafeMode();
-    // Also stop trajectory
-    if (traj_manager_ != nullptr) {
-        traj_manager_->stop();
-    }
 }
 
 // void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vector3Df &xidppp, float tactual){
@@ -779,27 +726,20 @@ void ctrl1::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vec
         break;
     
     case 2:
-        // ---- Phase 2: Trajectory mode ----
-        // Try to evaluate the active trajectory from TrajectoryManager.
-        // If no trajectory is executing, fall back to regulation at current setpoint.
-        if (traj_manager_ != nullptr) {
-            bool ok = traj_manager_->evaluate(tactual, xid, xidp, xidpp, xidppp);
-            if (!ok) {
-                // No active trajectory — hold current regulation setpoint
-                xid    = Vector3Df(xd_val, yd_val, zd_val);
-                xidp   = Vector3Df(0.0F, 0.0F, 0.0F);
-                xidpp  = Vector3Df(0.0F, 0.0F, 0.0F);
-                xidppp = Vector3Df(0.0F, 0.0F, 0.0F);
-            }
+        // trajectory
+        if (traj_manager_->IsRunning()) {
+            traj_manager_->GetPosition(xid);
+            traj_manager_->GetSpeed(xidp);
+            traj_manager_->GetAcceleration(xidpp);
+            traj_manager_->GetJerk(xidppp);
         } else {
-            // traj_manager_ not initialised (should not happen)
-            xid    = Vector3Df(0.0F, 0.0F, 0.0F);
-            xidp   = Vector3Df(0.0F, 0.0F, 0.0F);
-            xidpp  = Vector3Df(0.0F, 0.0F, 0.0F);
-            xidppp = Vector3Df(0.0F, 0.0F, 0.0F);
+            // Fallback to regulation when trajectory not running
+            xid = Vector3Df(xd_val, yd_val, zd_val);
+            xidp = Vector3Df(0, 0, 0);
+            xidpp = Vector3Df(0, 0, 0);
+            xidppp = Vector3Df(0, 0, 0);
         }
         break;
-
     default:
         xid = Vector3Df(0,0,0);
         xidp = Vector3Df(0,0,0);
@@ -965,17 +905,14 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     
     //Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
-    // ---- Phase 2-5: Update trajectory manager ----
-    // Must be called before pos_reference() so that button clicks processed in
-    // this loop iteration are visible when pos_reference() calls evaluate().
-    if (traj_manager_ != nullptr) {
-        traj_manager_->update(static_cast<float>(tactual), uav_pos);
-    }
 
-    pos_reference(xid, xidp, xidpp, xidppp, static_cast<float>(tactual));
+    // Update trajectory planner before reading references
+    traj_manager_->Update(GetTime());
+
+    pos_reference(xid, xidp, xidpp, xidppp, tactual);
 
     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
-    
+
     u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion);
     
     u_sliding_pos->Update(GetTime());
