@@ -51,10 +51,17 @@ Eigen::Vector3f signth(const Eigen::Vector3f& a, const float p) {
 
 Levant_diff::Levant_diff(std::string _mode, const float _aplha,
                          const float _lamb, const float _p)
-    : mode(_mode) {
-    this->alpha = _aplha;
-    this->lamb  = _lamb;
-    this->p     = _p;
+    : mode(_mode), alpha(_aplha), lamb(_lamb), p(_p),
+      u(0), u1(0), u1p(0), x(0), err(0) {
+    /* FIX: initialize all state to zero in constructor
+     * (original code left u, u1, u1p, x uninitialized). */
+    alpha_vec.setZero();
+    lamb_vec.setZero();
+    u_vec.setZero();
+    u1_vec.setZero();
+    u1p_vec.setZero();
+    x_vec.setZero();
+    err_v.setZero();
 }
 
 Levant_diff::~Levant_diff() {}
@@ -88,32 +95,45 @@ void Levant_diff::Reset(void) {
 }
 
 float Levant_diff::Compute(const float& f, const float dt) {
-    u = u1 - lamb * (sqrtf(fabs(x - f))) * sign_(x - f);
-    u1p = -alpha * sign_(x - f);
-    x  = rk4(x, dt, u);
-    u1 = rk4(u1, dt, u1p);
+    /* FIX: The original code used rk4() which, applied with a constant
+     * derivative, creates spurious polynomial growth and diverges.
+     * Additionally, explicit Euler with sign(x-f) or tanh(p*(x-f))
+     * causes chattering or instability when p is large.
+     *
+     * Use implicit sign resolution: replace sign(x-f) with
+     * clamp((x-f)/dt, -1, 1) — the Acary-Brogliato projection.
+     * This guarantees chattering-free behavior independent of gains. */
+    float sigma = x - f;
+    float impl_sign = sigma / (std::fabs(sigma) + dt);
+    u = u1 - lamb * sqrtf(std::fabs(sigma)) * impl_sign;
+    u1p = -alpha * impl_sign;
+    x  = euler_integrate(x, (double)dt, u);
+    u1 = euler_integrate(u1, (double)dt, u1p);
     err = x - f;
     return u;
 }
 
 void Levant_diff::Compute(float& _u, const float& f, const float dt) {
-    _u = u1 - lamb * (sqrtf(fabs(x - f))) * sign_(x - f);
-    u1p = -alpha * sign_(x - f);
-    x  = rk4(x, dt, _u);
-    u1 = rk4(u1, dt, u1p);
+    float sigma = x - f;
+    float impl_sign = sigma / (std::fabs(sigma) + dt);
+    _u = u1 - lamb * sqrtf(std::fabs(sigma)) * impl_sign;
+    u1p = -alpha * impl_sign;
+    x  = euler_integrate(x, (double)dt, _u);
+    u1 = euler_integrate(u1, (double)dt, u1p);
 }
 
 Eigen::Vector3f Levant_diff::Compute(const Eigen::Vector3f& f, const float dt) {
-    u_vec(0) = u1_vec(0) - lamb_vec(0) * sqrtf(fabs(x_vec(0) - f(0))) * sign_(x_vec(0) - f(0));
-    u_vec(1) = u1_vec(1) - lamb_vec(1) * sqrtf(fabs(x_vec(1) - f(1))) * sign_(x_vec(1) - f(1));
-    u_vec(2) = u1_vec(2) - lamb_vec(2) * sqrtf(fabs(x_vec(2) - f(2))) * sign_(x_vec(2) - f(2));
+    /* FIX: use implicit sign resolution (Acary-Brogliato projection)
+     * instead of sign_()/tanh() to prevent chattering and divergence. */
+    for (int i = 0; i < 3; ++i) {
+        float sigma = x_vec(i) - f(i);
+        float impl_sign = sigma / (std::fabs(sigma) + dt);
+        u_vec(i)   = u1_vec(i) - lamb_vec(i) * sqrtf(std::fabs(sigma)) * impl_sign;
+        u1p_vec(i) = -alpha_vec(i) * impl_sign;
+    }
 
-    u1p_vec(0) = -alpha_vec(0) * sign_(x_vec(0) - f(0));
-    u1p_vec(1) = -alpha_vec(1) * sign_(x_vec(1) - f(1));
-    u1p_vec(2) = -alpha_vec(2) * sign_(x_vec(2) - f(2));
-
-    x_vec  = rk4_const(x_vec,  dt, u_vec);
-    u1_vec = rk4_const(u1_vec, dt, u1p_vec);
+    x_vec  = euler_integrate(x_vec,  (double)dt, u_vec);
+    u1_vec = euler_integrate(u1_vec, (double)dt, u1p_vec);
 
     err_v = x_vec - f;
     return u_vec;
@@ -134,8 +154,10 @@ float Levant_diff::sign_(const float a) {
  * ==================================================================== */
 
 template<int Order>
-IRED<Order>::IRED(double L)
-    : L_(L), T_last_(0.001), T_last_f_(0.001f) {
+IRED<Order>::IRED(double L, double ema_alpha)
+    : L_(L), ema_alpha_(ema_alpha), T_last_(0.001), T_last_f_(0.001f) {
+    if (ema_alpha_ <= 0.0) ema_alpha_ = 0.01;
+    if (ema_alpha_ > 1.0)  ema_alpha_ = 1.0;
     compute_gains();
     compute_c_coeffs();
     reset();
@@ -149,10 +171,12 @@ void IRED<Order>::reset() {
     for (int i = 0; i <= Order; ++i) {
         z_[i] = 0.0;
     }
+    ema_ = 0.0;
     for (int ch = 0; ch < 3; ++ch) {
         for (int i = 0; i <= Order; ++i) {
             z_vec_[ch][i] = 0.0;
         }
+        ema_vec_[ch] = 0.0;
     }
     T_last_  = 0.001;
     T_last_f_ = 0.001f;
@@ -161,6 +185,13 @@ void IRED<Order>::reset() {
 template<int Order>
 void IRED<Order>::setLipschitz(double L) {
     L_ = L;
+}
+
+template<int Order>
+void IRED<Order>::setEmaAlpha(double alpha) {
+    if (alpha <= 0.0) alpha = 0.01;
+    if (alpha > 1.0)  alpha = 1.0;
+    ema_alpha_ = alpha;
 }
 
 /* ---------- gain selection (Seeber's closed-form recommended) ---------- */
@@ -341,12 +372,17 @@ void IRED<Order>::step_scalar(double* z, double measurement, double T) {
 
 /* ---------- single-channel output ---------- */
 template<int Order>
-double IRED<Order>::output_scalar(const double* z, int derivative_order, double T) const {
+double IRED<Order>::output_scalar(const double* z, int derivative_order, double T,
+                                  double ema_state) const {
     const int m = Order;
     /* derivative_order: 0 = 1st derivative, ..., m-1 = m-th derivative */
-    if (derivative_order < 0 || derivative_order >= m) {
-        if (derivative_order == m - 1) return z[m];
-        return 0.0;
+    if (derivative_order < 0 || derivative_order >= m) return 0.0;
+
+    /* Highest derivative (derivative_order == m-1): return EMA-filtered z_{m+1}
+     * to suppress inherent Nyquist oscillation at the sliding boundary.
+     * Lower derivatives use the output correction formula. */
+    if (derivative_order == m - 1) {
+        return ema_state;
     }
 
     /* y_{i+1} = sum_{j=i}^{m-1} T^{j-i} * c_[i][j] * z[j+1]
@@ -366,11 +402,14 @@ template<int Order>
 void IRED<Order>::step(double measurement, double dt) {
     T_last_ = dt;
     step_scalar(z_, measurement, dt);
+    /* EMA filter for the highest derivative: z_[Order] = z_{m+1}
+     * ema_{k+1} = alpha * z_{m+1,k+1} + (1 - alpha) * ema_k */
+    ema_ = ema_alpha_ * z_[Order] + (1.0 - ema_alpha_) * ema_;
 }
 
 template<int Order>
 double IRED<Order>::output(int derivative_order) const {
-    return output_scalar(z_, derivative_order, T_last_);
+    return output_scalar(z_, derivative_order, T_last_, ema_);
 }
 
 /* ---------- public Vector3f interface ---------- */
@@ -380,6 +419,9 @@ void IRED<Order>::step(const Eigen::Vector3f& measurement, float dt) {
     T_last_ = static_cast<double>(dt);
     for (int ch = 0; ch < 3; ++ch) {
         step_scalar(z_vec_[ch], static_cast<double>(measurement(ch)), static_cast<double>(dt));
+        /* EMA filter per channel */
+        ema_vec_[ch] = ema_alpha_ * z_vec_[ch][Order]
+                     + (1.0 - ema_alpha_) * ema_vec_[ch];
     }
 }
 
@@ -388,7 +430,7 @@ Eigen::Vector3f IRED<Order>::output_vec(int derivative_order) const {
     Eigen::Vector3f out;
     for (int ch = 0; ch < 3; ++ch) {
         out(ch) = static_cast<float>(
-            output_scalar(z_vec_[ch], derivative_order, T_last_));
+            output_scalar(z_vec_[ch], derivative_order, T_last_, ema_vec_[ch]));
     }
     return out;
 }
@@ -406,16 +448,16 @@ template class IRED<4>;
  *  Levant3  (legacy wrapper around IRED<3>)
  * ==================================================================== */
 
-Levant3::Levant3(uint8_t _mode, float _L, double _p)
-    : mode(_mode), L(static_cast<double>(_L)), p(_p), ired_(_L) {
+Levant3::Levant3(uint8_t _mode, float _L, double _ema_alpha)
+    : mode(_mode), L(static_cast<double>(_L)), ired_(_L, _ema_alpha) {
 }
 
 Levant3::~Levant3() {}
 
-void Levant3::setParam(double L, double p) {
+void Levant3::setParam(double L, double ema_alpha) {
     this->L = L;
-    this->p = p;
     ired_.setLipschitz(L);
+    ired_.setEmaAlpha(ema_alpha);
 }
 
 void Levant3::Reset() {

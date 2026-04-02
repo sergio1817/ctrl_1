@@ -267,7 +267,15 @@ class IRED {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-    explicit IRED(double L = 1.0);
+    /*!
+     * \param L           Lipschitz constant of the (m+1)-th derivative of the signal.
+     * \param ema_alpha   Exponential moving average coefficient for the highest
+     *                    derivative output (0 < alpha <= 1).  alpha=1 means no
+     *                    filtering.  Lower values smooth the inherent Nyquist
+     *                    oscillation of z_{m+1} at the sliding boundary.
+     *                    Recommended: 0.1–0.3 for noisy signals, 1.0 for clean.
+     */
+    explicit IRED(double L = 1.0, double ema_alpha = 0.2);
     ~IRED();
 
     /*! \brief Scalar step. */
@@ -282,12 +290,18 @@ public:
 
     void reset();
     void setLipschitz(double L);
+    void setEmaAlpha(double alpha);  ///< Set EMA filter coefficient (0 < alpha <= 1)
 
 private:
     double L_;
+    double ema_alpha_;               ///< EMA coefficient for highest derivative
     double lambda_[Order + 1];       ///< gains
     double z_[Order + 1];            ///< scalar states  z[0] = position, z[Order] = highest
     double c_[Order][Order];         ///< output correction coefficients  (0-indexed)
+
+    /* EMA filter state for the highest derivative (per channel) */
+    double ema_;                     ///< scalar channel EMA state
+    double ema_vec_[3];              ///< vector channel EMA states
 
     /* three independent scalar channels for the vector interface */
     double z_vec_[3][Order + 1];
@@ -299,7 +313,8 @@ private:
     /* internal step for a single scalar channel */
     void step_scalar(double* z, double measurement, double T);
     /* internal output for a single scalar channel */
-    double output_scalar(const double* z, int derivative_order, double T_last) const;
+    double output_scalar(const double* z, int derivative_order, double T_last,
+                         double ema_state) const;
 
     double T_last_;                  ///< last dt used (for output correction)
     float  T_last_f_;                ///< float copy for vector interface
@@ -350,10 +365,20 @@ class Levant3 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-    explicit Levant3(uint8_t _mode = 1, float _L = 1.0F, double _p = 300.0);
+    /*!
+     * \param _mode       0 = sign, 1 = tanh (legacy, not used by IRED).
+     * \param _L          Lipschitz constant of the 4th derivative of the signal.
+     * \param _ema_alpha  EMA filter coefficient for highest derivative (0.1–1.0).
+     */
+    explicit Levant3(uint8_t _mode = 1, float _L = 1.0F, double _ema_alpha = 0.2);
     ~Levant3();
 
-    void setParam(double L, double p);
+    /*!
+     * \brief Set parameters.
+     * \param L          Lipschitz constant (passed to IRED).
+     * \param ema_alpha  EMA filter coefficient for highest derivative.
+     */
+    void setParam(double L, double ema_alpha = 0.2);
 
     double compute(double& f, float dt);
     Eigen::Vector3f compute(const Eigen::Vector3f& f, float dt);
@@ -366,7 +391,6 @@ public:
 private:
     uint8_t mode;
     double L;
-    double p;
     IRED<3> ired_;
 };
 

@@ -140,7 +140,7 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
 
 
     levant = Levant_diff("tanh", 8, 6, 3000);
-    levant3 = Levant3(1, 8, 3000.0);
+    levant3 = Levant3(1, 8, 0.2);  // mode=1, L=8, ema_alpha=0.2
 
     sgnpos_p << 0,0,0;
     sgnpos << 0,0,0;
@@ -466,7 +466,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     if(levantd->IsChecked()){
         // levant.setParam(alpha_l->Value(), lamb_l->Value());
         // up = levant.Compute(u,delta_t);
-        levant3.setParam(alpha_l->Value(), lamb_l->Value());
+        levant3.setParam(alpha_l->Value(), 0.2);  // L from GUI, ema_alpha=0.2
         up = levant3.compute(u,delta_t);
         //ud = levant.Compute(vec,delta_t);
     }else{
