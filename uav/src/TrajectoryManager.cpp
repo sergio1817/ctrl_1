@@ -21,6 +21,7 @@
 #include <DoubleSpinBox.h>
 #include <SpinBox.h>
 #include <PushButton.h>
+#include <ComboBox.h>
 #include <Label.h>
 #include <DataPlot1D.h>
 #include <DataPlot2D.h>
