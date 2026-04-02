@@ -1008,51 +1008,44 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
         return true;
     }
 
-    // A* data structures
-    struct Node {
-        int x, y, z;
-        double g, f;
-        int parent;
+    // Memory-efficient A* using flat arrays indexed by grid cell.
+    // Uses ~5 bytes/cell instead of ~80 bytes/cell with unordered_map.
+    size_t N = static_cast<size_t>(grid_nx_) * grid_ny_ * grid_nz_;
+
+    // g-cost array (FLT_MAX = unvisited)
+    std::vector<float> g_cost(N, std::numeric_limits<float>::max());
+    // parent: flat index of parent cell (-1 = start)
+    std::vector<int> parent(N, -2);  // -2 = not visited
+
+    struct PQEntry {
+        float f;
+        int cell;  // flat index
+        bool operator>(const PQEntry &o) const { return f > o.f; }
     };
+    std::priority_queue<PQEntry, std::vector<PQEntry>, std::greater<PQEntry> > open_q;
 
-    struct Compare {
-        bool operator()(const std::pair<double, int> &a,
-                        const std::pair<double, int> &b) const {
-            return a.first > b.first;
-        }
-    };
+    // Helpers
+    int nyz = grid_ny_ * grid_nz_;
+    #define CELL_IDX(ix_, iy_, iz_) ((ix_) * nyz + (iy_) * grid_nz_ + (iz_))
 
-    std::vector<Node> nodes;
-    nodes.reserve(4096);
-    std::priority_queue<std::pair<double, int>,
-                        std::vector<std::pair<double, int> >,
-                        Compare> open_q;
-    std::unordered_map<int64_t, int> closed;
-    std::unordered_map<int64_t, int> open_set;
-
-    int64_t ny64 = static_cast<int64_t>(grid_ny_);
-    int64_t nz64 = static_cast<int64_t>(grid_nz_);
-
-    // Lambda-like helper for encoding (C++11 compatible)
-    #define ENCODE_IDX(x_, y_, z_) (static_cast<int64_t>(x_) * ny64 * nz64 + static_cast<int64_t>(y_) * nz64 + static_cast<int64_t>(z_))
-
-    auto eucDist = [](int x1, int y1, int z1, int x2, int y2, int z2) -> double {
-        double dx = static_cast<double>(x2 - x1);
-        double dy = static_cast<double>(y2 - y1);
-        double dz = static_cast<double>(z2 - z1);
+    auto eucDist = [](int x1, int y1, int z1, int x2, int y2, int z2) -> float {
+        float dx = static_cast<float>(x2 - x1);
+        float dy = static_cast<float>(y2 - y1);
+        float dz = static_cast<float>(z2 - z1);
         return std::sqrt(dx*dx + dy*dy + dz*dz);
     };
 
-    Node start_n;
-    start_n.x = sx; start_n.y = sy; start_n.z = sz;
-    start_n.g = 0.0;
-    start_n.f = eucDist(sx, sy, sz, gx, gy, gz) * grid_res_;
-    start_n.parent = -1;
-    nodes.push_back(start_n);
-    open_set[ENCODE_IDX(sx, sy, sz)] = 0;
-    open_q.push(std::make_pair(start_n.f, 0));
+    float res_f = static_cast<float>(grid_res_);
+    int start_cell = CELL_IDX(sx, sy, sz);
+    int goal_cell = CELL_IDX(gx, gy, gz);
+    g_cost[start_cell] = 0.0f;
+    parent[start_cell] = -1;  // -1 = start node
+    PQEntry se;
+    se.f = eucDist(sx, sy, sz, gx, gy, gz) * res_f;
+    se.cell = start_cell;
+    open_q.push(se);
 
-    // 26-connectivity offsets and costs
+    // 26-connectivity
     static const int offsets[26][3] = {
         { 1, 0, 0}, {-1, 0, 0}, { 0, 1, 0}, { 0,-1, 0}, { 0, 0, 1}, { 0, 0,-1},
         { 1, 1, 0}, { 1,-1, 0}, {-1, 1, 0}, {-1,-1, 0},
@@ -1061,110 +1054,87 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
         { 1, 1, 1}, { 1, 1,-1}, { 1,-1, 1}, { 1,-1,-1},
         {-1, 1, 1}, {-1, 1,-1}, {-1,-1, 1}, {-1,-1,-1}
     };
-    static const double step_costs[26] = {
-        1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-        1.41421356, 1.41421356, 1.41421356, 1.41421356,
-        1.41421356, 1.41421356, 1.41421356, 1.41421356,
-        1.41421356, 1.41421356, 1.41421356, 1.41421356,
-        1.73205081, 1.73205081, 1.73205081, 1.73205081,
-        1.73205081, 1.73205081, 1.73205081, 1.73205081
+    static const float step_costs[26] = {
+        1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+        1.41421356f, 1.41421356f, 1.41421356f, 1.41421356f,
+        1.41421356f, 1.41421356f, 1.41421356f, 1.41421356f,
+        1.41421356f, 1.41421356f, 1.41421356f, 1.41421356f,
+        1.73205081f, 1.73205081f, 1.73205081f, 1.73205081f,
+        1.73205081f, 1.73205081f, 1.73205081f, 1.73205081f
     };
 
     bool found = false;
-    int goal_node_idx = -1;
-    const int MAX_ITER = grid_nx_ * grid_ny_ * grid_nz_;
+    int max_iter = static_cast<int>(std::min(N, static_cast<size_t>(800000)));
     int iter = 0;
 
-    while (!open_q.empty() && iter < MAX_ITER) {
+    while (!open_q.empty() && iter < max_iter) {
         ++iter;
-        std::pair<double, int> top = open_q.top();
+        PQEntry top = open_q.top();
         open_q.pop();
-        int cur_idx = top.second;
-        const Node &cur = nodes[cur_idx];
-        int64_t cur_key = ENCODE_IDX(cur.x, cur.y, cur.z);
 
-        if (closed.count(cur_key)) continue;
-        closed[cur_key] = cur_idx;
+        int ci = top.cell;
+        if (top.f > g_cost[ci] + eucDist(ci / nyz, (ci % nyz) / grid_nz_, ci % grid_nz_,
+                                          gx, gy, gz) * res_f + 0.01f) {
+            continue;  // stale entry
+        }
 
-        if (cur.x == gx && cur.y == gy && cur.z == gz) {
+        if (ci == goal_cell) {
             found = true;
-            goal_node_idx = cur_idx;
             break;
         }
 
+        // Decode current cell
+        int cx = ci / nyz;
+        int cy = (ci % nyz) / grid_nz_;
+        int cz = ci % grid_nz_;
+        float cur_g = g_cost[ci];
+
         for (int ni = 0; ni < 26; ++ni) {
-            int nx_i = cur.x + offsets[ni][0];
-            int ny_i = cur.y + offsets[ni][1];
-            int nz_i = cur.z + offsets[ni][2];
+            int nx_i = cx + offsets[ni][0];
+            int ny_i = cy + offsets[ni][1];
+            int nz_i = cz + offsets[ni][2];
 
             if (!GridInBounds(nx_i, ny_i, nz_i)) continue;
             if (IsOccupied(nx_i, ny_i, nz_i)) continue;
 
-            // Check diagonal safety (no corner cutting)
+            // Diagonal safety
             int dx = offsets[ni][0], dy = offsets[ni][1], dz = offsets[ni][2];
             int nz_count = (dx != 0 ? 1 : 0) + (dy != 0 ? 1 : 0) + (dz != 0 ? 1 : 0);
-            bool legal = true;
-            if (nz_count == 2) {
-                if (dx != 0 && dy != 0) {
-                    if (IsOccupied(cur.x + dx, cur.y, cur.z) ||
-                        IsOccupied(cur.x, cur.y + dy, cur.z)) legal = false;
-                } else if (dx != 0 && dz != 0) {
-                    if (IsOccupied(cur.x + dx, cur.y, cur.z) ||
-                        IsOccupied(cur.x, cur.y, cur.z + dz)) legal = false;
-                } else {
-                    if (IsOccupied(cur.x, cur.y + dy, cur.z) ||
-                        IsOccupied(cur.x, cur.y, cur.z + dz)) legal = false;
-                }
-            } else if (nz_count == 3) {
-                if (IsOccupied(cur.x + dx, cur.y, cur.z) ||
-                    IsOccupied(cur.x, cur.y + dy, cur.z) ||
-                    IsOccupied(cur.x, cur.y, cur.z + dz) ||
-                    IsOccupied(cur.x + dx, cur.y + dy, cur.z) ||
-                    IsOccupied(cur.x + dx, cur.y, cur.z + dz) ||
-                    IsOccupied(cur.x, cur.y + dy, cur.z + dz)) legal = false;
+            if (nz_count >= 2) {
+                bool blocked = false;
+                if (dx != 0 && IsOccupied(cx + dx, cy, cz)) blocked = true;
+                if (dy != 0 && IsOccupied(cx, cy + dy, cz)) blocked = true;
+                if (dz != 0 && IsOccupied(cx, cy, cz + dz)) blocked = true;
+                if (blocked) continue;
             }
-            if (!legal) continue;
 
-            int64_t nb_key = ENCODE_IDX(nx_i, ny_i, nz_i);
-            if (closed.count(nb_key)) continue;
-
-            double new_g = cur.g + step_costs[ni] * grid_res_;
-            double h = eucDist(nx_i, ny_i, nz_i, gx, gy, gz) * grid_res_;
-            double new_f = new_g + h;
-
-            std::unordered_map<int64_t, int>::iterator oit = open_set.find(nb_key);
-            if (oit != open_set.end()) {
-                Node &existing = nodes[oit->second];
-                if (new_g < existing.g) {
-                    existing.g = new_g;
-                    existing.f = new_f;
-                    existing.parent = cur_idx;
-                    open_q.push(std::make_pair(new_f, oit->second));
-                }
-            } else {
-                Node nb;
-                nb.x = nx_i; nb.y = ny_i; nb.z = nz_i;
-                nb.g = new_g; nb.f = new_f;
-                nb.parent = cur_idx;
-                int nb_si = static_cast<int>(nodes.size());
-                nodes.push_back(nb);
-                open_set[nb_key] = nb_si;
-                open_q.push(std::make_pair(new_f, nb_si));
+            int nb = CELL_IDX(nx_i, ny_i, nz_i);
+            float new_g = cur_g + step_costs[ni] * res_f;
+            if (new_g < g_cost[nb]) {
+                g_cost[nb] = new_g;
+                parent[nb] = ci;
+                float h = eucDist(nx_i, ny_i, nz_i, gx, gy, gz) * res_f;
+                PQEntry e;
+                e.f = new_g + h;
+                e.cell = nb;
+                open_q.push(e);
             }
         }
     }
 
-    #undef ENCODE_IDX
+    #undef CELL_IDX
 
     if (!found) return false;
 
     // Reconstruct path
     std::vector<Eigen::Vector3d> raw_path;
-    int idx = goal_node_idx;
-    while (idx >= 0) {
-        const Node &n = nodes[idx];
-        raw_path.push_back(GridToWorld(n.x, n.y, n.z));
-        idx = n.parent;
+    int ci = goal_cell;
+    while (ci >= 0) {
+        int ix = ci / nyz;
+        int iy = (ci % nyz) / grid_nz_;
+        int iz = ci % grid_nz_;
+        raw_path.push_back(GridToWorld(ix, iy, iz));
+        ci = parent[ci];
     }
     std::reverse(raw_path.begin(), raw_path.end());
 
