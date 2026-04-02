@@ -25,6 +25,8 @@
 #include <DataPlot2D.h>
 #include <LayoutPosition.h>
 #include <Layout.h>
+#include <Tab.h>
+#include <TabWidget.h>
 #include <Thread.h>
 #include <Vector3D.h>
 #include <Eigen/Dense>
@@ -40,7 +42,9 @@ using namespace flair::gui;
 // ============================================================
 // Constructor
 // ============================================================
-TrajectoryManager::TrajectoryManager(const LayoutPosition *position, string name)
+TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
+                                     TabWidget *plots_tab,
+                                     string name)
     : IODevice(position->getLayout(), name),
       state_(State::IDLE),
       output_matrix_(NULL),
@@ -114,12 +118,12 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position, string name
     status_label_->SetText("IDLE");
 
     // --------------------------------------------------------
-    // DataPlots for trajectory visualization
-    // (Use main_box->NewRow() for layout positions — the original
-    //  'position' was consumed by the GroupBox constructor above)
+    // DataPlots on a dedicated tab under the Position TabWidget
     // --------------------------------------------------------
+    Tab *plot_tab = new Tab(plots_tab, "Plots Trajectory");
+
     // 2D XY trajectory plot
-    DataPlot2D *xy_plot = new DataPlot2D(main_box->NewRow(), "XY Trajectory",
+    DataPlot2D *xy_plot = new DataPlot2D(plot_tab->NewRow(), "XY Trajectory",
                                           "X [m]", -3, 3,
                                           "Y [m]", -3, 3);
     xy_plot->AddCurve(output_matrix_->Element(0, 0),
@@ -127,23 +131,23 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position, string name
                       DataPlot::Red, "desired");
 
     // 1D position plots
-    DataPlot1D *pos_x_plot = new DataPlot1D(main_box->NewRow(), "Desired X", -3, 3);
+    DataPlot1D *pos_x_plot = new DataPlot1D(plot_tab->NewRow(), "Desired X", -3, 3);
     pos_x_plot->AddCurve(output_matrix_->Element(0, 0), DataPlot::Red, "des_x");
 
-    DataPlot1D *pos_y_plot = new DataPlot1D(main_box->LastRowLastCol(), "Desired Y", -3, 3);
+    DataPlot1D *pos_y_plot = new DataPlot1D(plot_tab->LastRowLastCol(), "Desired Y", -3, 3);
     pos_y_plot->AddCurve(output_matrix_->Element(1, 0), DataPlot::Green, "des_y");
 
-    DataPlot1D *pos_z_plot = new DataPlot1D(main_box->LastRowLastCol(), "Desired Z", -3, 0);
+    DataPlot1D *pos_z_plot = new DataPlot1D(plot_tab->LastRowLastCol(), "Desired Z", -3, 0);
     pos_z_plot->AddCurve(output_matrix_->Element(2, 0), DataPlot::Blue, "des_z");
 
     // Velocity plot
-    DataPlot1D *vel_plot = new DataPlot1D(main_box->NewRow(), "Desired Vel", -5, 5);
+    DataPlot1D *vel_plot = new DataPlot1D(plot_tab->NewRow(), "Desired Vel", -5, 5);
     vel_plot->AddCurve(output_matrix_->Element(3, 0), DataPlot::Red, "vx");
     vel_plot->AddCurve(output_matrix_->Element(4, 0), DataPlot::Green, "vy");
     vel_plot->AddCurve(output_matrix_->Element(5, 0), DataPlot::Blue, "vz");
 
     // Progress plot
-    DataPlot1D *prog_plot = new DataPlot1D(main_box->NewRow(), "Progress", 0, 1.1f);
+    DataPlot1D *prog_plot = new DataPlot1D(plot_tab->NewRow(), "Progress", 0, 1.1f);
     prog_plot->AddCurve(output_matrix_->Element(12, 0), DataPlot::Black, "t/T");
 
     // --------------------------------------------------------
@@ -244,11 +248,20 @@ void TrajectoryManager::Update(Time time) {
         output_matrix_->SetDataTime(time);
         ProcessUpdate(output_matrix_);
 
-        // Check trajectory completion
+        // Check trajectory completion — hold final position
         if (t_traj >= total_duration_) {
-            state_ = State::IDLE;
-            status_label_->SetText("IDLE (complete)");
-            Info("trajectory complete\n");
+            // Store the final position (evaluated at t = total_duration)
+            Eigen::Vector3d p_end = EvalPos(total_duration_);
+            last_pos_ = Vector3Df(static_cast<float>(p_end.x()),
+                                  static_cast<float>(p_end.y()),
+                                  static_cast<float>(p_end.z()));
+            last_vel_ = Vector3Df(0, 0, 0);
+            last_acc_ = Vector3Df(0, 0, 0);
+            last_jerk_ = Vector3Df(0, 0, 0);
+            progress_ = 1.0f;
+            state_ = State::HOLDING;
+            status_label_->SetText("Holding position");
+            Info("trajectory complete, holding final position\n");
         }
 
         // Check replan trigger
@@ -257,6 +270,20 @@ void TrajectoryManager::Update(Time time) {
             last_replan_time_ = t_traj;
             // Could trigger Replan here if obstacle avoidance is active
         }
+    } else if (state_ == State::HOLDING) {
+        // Holding final position — output last_pos_ with zero derivatives
+        output_matrix_->GetMutex();
+        output_matrix_->SetValueNoMutex(0, 0, last_pos_.x);
+        output_matrix_->SetValueNoMutex(1, 0, last_pos_.y);
+        output_matrix_->SetValueNoMutex(2, 0, last_pos_.z);
+        for (int i = 3; i < 12; ++i) {
+            output_matrix_->SetValueNoMutex(i, 0, 0.0f); // vel, acc, jerk = 0
+        }
+        output_matrix_->SetValueNoMutex(12, 0, 1.0f); // progress = 100%
+        output_matrix_->ReleaseMutex();
+
+        output_matrix_->SetDataTime(time);
+        ProcessUpdate(output_matrix_);
     } else {
         // Not executing - zero output
         output_matrix_->GetMutex();
@@ -304,7 +331,7 @@ float TrajectoryManager::GetProgress() const {
 }
 
 bool TrajectoryManager::IsRunning() const {
-    return state_ == State::EXECUTING;
+    return state_ == State::EXECUTING || state_ == State::HOLDING;
 }
 
 // ============================================================

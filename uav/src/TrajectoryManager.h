@@ -33,6 +33,8 @@ namespace flair {
         class ComboBox;
         class GroupBox;
         class Label;
+        class TabWidget;
+        class Tab;
         class DataPlot1D;
         class DataPlot2D;
     }
@@ -63,7 +65,12 @@ public:
      * \param position Layout position for GUI widgets
      * \param name Object name
      */
-    TrajectoryManager(const flair::gui::LayoutPosition *position, std::string name);
+    /// @param position   LayoutPosition for the settings widgets
+    /// @param plots_tab   TabWidget where the trajectory plots tab will be created
+    /// @param name        object name
+    TrajectoryManager(const flair::gui::LayoutPosition *position,
+                      flair::gui::TabWidget *plots_tab,
+                      std::string name);
 
     /*!
      * \brief Destructor
@@ -204,7 +211,8 @@ private:
         PLANNING,
         PLANNED,
         EXECUTING,
-        REPLANNING
+        REPLANNING,
+        HOLDING     ///< Trajectory finished, holding final position
     };
 
     State state_;

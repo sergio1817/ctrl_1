@@ -122,7 +122,7 @@ ctrl1::ctrl1(TargetController *controller)
     GroupBox *trajbox = new GroupBox(positionTab->NewRow(), "Setup trajectory");
 
     // Trajectory planner (IODevice, creates its own GUI and DataPlots)
-    traj_manager_ = new TrajectoryManager(trajbox->NewRow(), "Trajectory Planner");
+    traj_manager_ = new TrajectoryManager(trajbox->NewRow(), tabWidget4, "Trajectory Planner");
 
     position_behavior = new ComboBox(posbox->NewRow(),"Select behavior");
     position_behavior->AddItem("Regulation");
