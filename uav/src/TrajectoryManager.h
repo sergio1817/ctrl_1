@@ -23,7 +23,7 @@ namespace flair {
     namespace core {
         class Matrix;
         class io_data;
-        class Time;
+        // Time is a typedef (unsigned long long), not a class — no forward decl needed
     }
     namespace gui {
         class LayoutPosition;
