@@ -319,6 +319,7 @@ private:
     void MarkCylinderOccupied(double cx, double cy, double radius);
     bool IsOccupied(int ix, int iy, int iz) const;
     bool IsOccupiedWorld(const Eigen::Vector3d &pos) const;
+    Eigen::Vector3d FindNearestFreeCell(const Eigen::Vector3d &pos) const;
     bool GridInBounds(int ix, int iy, int iz) const;
     Eigen::Vector3i WorldToGrid(const Eigen::Vector3d &pos) const;
     Eigen::Vector3d GridToWorld(int ix, int iy, int iz) const;

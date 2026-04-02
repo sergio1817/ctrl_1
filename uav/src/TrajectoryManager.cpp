@@ -861,6 +861,40 @@ bool TrajectoryManager::IsOccupiedWorld(const Eigen::Vector3d &pos) const {
     return IsOccupied(gi.x(), gi.y(), gi.z());
 }
 
+Eigen::Vector3d TrajectoryManager::FindNearestFreeCell(const Eigen::Vector3d &pos) const {
+    // BFS outward from the occupied cell to find the nearest free cell
+    Eigen::Vector3i gc = WorldToGrid(pos);
+    int cx = gc.x(), cy = gc.y(), cz = gc.z();
+
+    // Search in expanding shells (radius 1, 2, 3, ...)
+    for (int radius = 1; radius <= 50; ++radius) {
+        double best_dist = 1e9;
+        Eigen::Vector3i best(-1, -1, -1);
+        for (int dx = -radius; dx <= radius; ++dx) {
+            for (int dy = -radius; dy <= radius; ++dy) {
+                for (int dz = -radius; dz <= radius; ++dz) {
+                    // Only check the shell surface
+                    if (std::abs(dx) != radius && std::abs(dy) != radius && std::abs(dz) != radius)
+                        continue;
+                    int nx = cx + dx, ny = cy + dy, nz = cz + dz;
+                    if (GridInBounds(nx, ny, nz) && !IsOccupied(nx, ny, nz)) {
+                        double d = std::sqrt(static_cast<double>(dx*dx + dy*dy + dz*dz));
+                        if (d < best_dist) {
+                            best_dist = d;
+                            best = Eigen::Vector3i(nx, ny, nz);
+                        }
+                    }
+                }
+            }
+        }
+        if (best.x() >= 0) {
+            return GridToWorld(best.x(), best.y(), best.z());
+        }
+    }
+    // If nothing found, return original (shouldn't happen in a reasonable workspace)
+    return pos;
+}
+
 Eigen::Vector3i TrajectoryManager::WorldToGrid(const Eigen::Vector3d &pos) const {
     int ix = static_cast<int>(std::floor((pos.x() - grid_origin_.x()) / grid_res_));
     int iy = static_cast<int>(std::floor((pos.y() - grid_origin_.y()) / grid_res_));
@@ -1416,22 +1450,25 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
              IsOccupiedWorld(obstacles_[i].pos) ? 1 : 0);
     }
 
-    // Step 2: Find collision-free path through consecutive waypoints
+    // Step 2: Shift any waypoint that lands inside an obstacle to the nearest free cell
+    for (int i = 0; i < num_waypoints_; ++i) {
+        if (IsOccupiedWorld(waypoints_[i])) {
+            Eigen::Vector3d shifted = FindNearestFreeCell(waypoints_[i]);
+            Warn("WP%d(%.2f,%.2f,%.2f) is inside obstacle, shifted to (%.2f,%.2f,%.2f)\n",
+                 i, waypoints_[i].x(), waypoints_[i].y(), waypoints_[i].z(),
+                 shifted.x(), shifted.y(), shifted.z());
+            waypoints_[i] = shifted;
+        }
+    }
+
+    // Step 3: Find collision-free path through consecutive waypoints
     std::vector<Eigen::Vector3d> full_path;
     full_path.push_back(waypoints_[0]);
 
     for (int i = 0; i < num_waypoints_ - 1; ++i) {
         std::vector<Eigen::Vector3d> seg_path;
         if (!FindPath(waypoints_[i], waypoints_[i + 1], seg_path)) {
-            Warn("A* failed between WP%d(%.2f,%.2f,%.2f) and WP%d(%.2f,%.2f,%.2f)\n",
-                 i, waypoints_[i].x(), waypoints_[i].y(), waypoints_[i].z(),
-                 i+1, waypoints_[i+1].x(), waypoints_[i+1].y(), waypoints_[i+1].z());
-            Eigen::Vector3i s_g = WorldToGrid(waypoints_[i]);
-            Eigen::Vector3i g_g = WorldToGrid(waypoints_[i+1]);
-            Warn("  start_cell(%d,%d,%d) occ=%d, goal_cell(%d,%d,%d) occ=%d\n",
-                 s_g.x(), s_g.y(), s_g.z(), IsOccupied(s_g.x(), s_g.y(), s_g.z()),
-                 g_g.x(), g_g.y(), g_g.z(), IsOccupied(g_g.x(), g_g.y(), g_g.z()));
-            // Fallback: use direct connection (obstacle avoidance bypassed)
+            Warn("A* failed between WP%d and WP%d, using direct fallback\n", i, i+1);
             seg_path.clear();
             seg_path.push_back(waypoints_[i]);
             seg_path.push_back(waypoints_[i + 1]);
