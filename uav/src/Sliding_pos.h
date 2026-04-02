@@ -129,6 +129,8 @@ private:
 
     Eigen::Vector3f sgnpos_p, sgnpos, sgnori_p, sgnori;
 
+    Eigen::Vector3f NNap_prev;  // previous Actor output for backward difference of Ŷr
+
     Eigen::Matrix3f I = Eigen::Matrix3f::Identity(3,3);
     Eigen::Vector3f nu_t0, nup_t0;
 

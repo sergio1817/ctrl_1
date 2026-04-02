@@ -147,7 +147,9 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
 
     sgnori_p << 0,0,0;
     sgnori << 0,0,0;
-    
+
+    NNap_prev << 0,0,0;
+
     AddDataToLog(state);
     AddDeviceToLog(ac1);
     AddDeviceToLog(ac2);
@@ -176,6 +178,8 @@ void Sliding_pos::Reset(void) {
     sgnpos_kahan.compensation.setZero();
     sgnori_kahan.value.setZero();
     sgnori_kahan.compensation.setZero();
+
+    NNap_prev = Eigen::Vector3f::Zero();
 
     levant.Reset();
     levant3.Reset();
@@ -464,11 +468,42 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f up;
     // Eigen::Vector3f ud;
     if(levantd->IsChecked()){
-        // levant.setParam(alpha_l->Value(), lamb_l->Value());
-        // up = levant.Compute(u,delta_t);
-        levant3.setParam(alpha_l->Value(), 0.2);  // L from GUI, ema_alpha=0.2
-        up = levant3.compute(u,delta_t);
-        //ud = levant.Compute(vec,delta_t);
+        // === Analytical derivative of u (eq 3.82) ===
+        // u = -Kp * sp + NNap
+        // u̇ = -Kp * ṡp + Ẏ̂r
+        //
+        // ṡp = ṡqp + γp * σ̇p
+        // ṡqp = ξ̈e + αp * ξ̇e
+        // ξ̈e = u/m + g*ez - ξ̈d   (free flight, eq 3.2 with λ=0)
+        // σ̇p = tanh(p * sqp) = sgnpos_p (already computed)
+        //
+        // Ẏ̂r ≈ (NNap - NNap_prev) / delta_t  (backward difference)
+
+        const float safe_m = (std::abs(m_val) < kEps) ? (m_val >= 0.0F ? kEps : -kEps) : m_val;
+
+        // ξ̈e = u/m + g*ez - ξ̈d
+        Eigen::Vector3f xi_ddot_e = u / safe_m + g_val * ez - xidpp;
+
+        // ṡqp = ξ̈e + αp * ξ̇e
+        Eigen::Vector3f sqp_dot = xi_ddot_e + alphap_v.cwiseProduct(xiep);
+
+        // σ̇p = tanh(p * sqp) — already computed as sgnpos_p
+
+        // ṡp = ṡqp + γp * σ̇p
+        Eigen::Vector3f sp_dot = sqp_dot + gammap_v.cwiseProduct(sgnpos_p);
+
+        // Ẏ̂r ≈ backward difference (NNap is from current step, NNap_prev from previous)
+        Eigen::Vector3f NNap_dot = Eigen::Vector3f::Zero();
+        if (delta_t > kEps) {
+            NNap_dot = (NNap - NNap_prev) / static_cast<float>(delta_t);
+        }
+
+        // u̇ = -Kp * ṡp + Ẏ̂r
+        up = -Kpv.cwiseProduct(sp_dot) + NNap_dot;
+
+        // Store current NNap for next iteration
+        NNap_prev = NNap;
+
     }else{
         const float safe_m = (std::abs(m_val) < kEps) ? (m_val >= 0.0F ? kEps : -kEps) : m_val;
         const Eigen::Vector3f gamma_lamb = gammap_v.cwiseProduct(Lambpv);
