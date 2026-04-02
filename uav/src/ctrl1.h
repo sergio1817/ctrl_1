@@ -87,6 +87,7 @@ class ctrl1 : public flair::meta::UavStateMachine {
         TrajectoryManager *traj_manager_;
 
         flair::meta::MetaVrpnObject *uavVrpn;
+        flair::meta::MetaVrpnObject *targetVrpn;
         flair::sensor::VrpnClient *vrpnclient;
         
         //bool first_update;

@@ -53,6 +53,7 @@ ctrl1::ctrl1(TargetController *controller)
             behaviourMode(BehaviourMode_t::Default),
             vrpnLost(false),
             uavVrpn(nullptr),
+            targetVrpn(nullptr),
             vrpnclient(nullptr) {
     Uav* uav=GetUav();
 
@@ -68,13 +69,13 @@ ctrl1::ctrl1(TargetController *controller)
     
     if(vrpnclient->ConnectionType()==VrpnClient::Xbee) {
         uavVrpn = new MetaVrpnObject(uav->ObjectName(),(uint8_t)0);
-        //targetVrpn=new MetaVrpnObject("target",1);
+        targetVrpn=new MetaVrpnObject("target",1);
     } else if (vrpnclient->ConnectionType()==VrpnClient::Vrpn) {
         uavVrpn = new MetaVrpnObject(uav->ObjectName());
-        //targetVrpn=new MetaVrpnObject("target");
+        targetVrpn=new MetaVrpnObject("target");
     } else if (vrpnclient->ConnectionType()==VrpnClient::VrpnLite) {
         uavVrpn = new MetaVrpnObject(uav->ObjectName());
-        //targetVrpn=new MetaVrpnObject("target");
+        targetVrpn=new MetaVrpnObject("target");
     }
     
     //getFrameworkManager()->AddDeviceToLog(jr3);
@@ -123,6 +124,9 @@ ctrl1::ctrl1(TargetController *controller)
 
     // Trajectory planner (IODevice, creates its own GUI and DataPlots)
     traj_manager_ = new TrajectoryManager(trajbox->NewRow(), tabWidget4, "Trajectory Planner");
+
+    // Register target rigid body as obstacle 0 (radius 0.15 m default)
+    traj_manager_->AddObstacle(Vector3Df(0, 0, -99), 0.15f);
 
     position_behavior = new ComboBox(posbox->NewRow(),"Select behavior");
     position_behavior->AddItem("Regulation");
@@ -905,6 +909,16 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     
     //Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
     
+
+    // Feed target rigid body as a dynamic obstacle (if tracked)
+    if (targetVrpn != nullptr && targetVrpn->IsTracked(500)) {
+        Vector3Df target_pos;
+        targetVrpn->GetPosition(target_pos);
+        traj_manager_->UpdateObstaclePosition(0, target_pos);
+        Vector3Df target_vel;
+        targetVrpn->GetSpeed(target_vel);
+        traj_manager_->UpdateObstacleVelocity(0, target_vel);
+    }
 
     // Update trajectory planner before reading references
     traj_manager_->Update(GetTime());
