@@ -230,8 +230,9 @@ private:
     // Trajectory storage (polynomial coefficients per segment)
     // Each segment: 3 x (ORDER+1) coefficient matrix, duration
     static const int POLY_ORDER = 7;  // min-snap = degree 7
-    static const int MAX_SEGMENTS = 6;
-    static const int MAX_WAYPOINTS = 7;  // MAX_SEGMENTS + 1
+    static const int MAX_SEGMENTS = 20;
+    static const int MAX_GUI_WAYPOINTS = 7;  // GUI waypoints
+    static const int MAX_WAYPOINTS = MAX_SEGMENTS + 1;
     static const int COEFFS_PER_SEG = POLY_ORDER + 1;  // 8
 
     struct TrajectorySegment {
@@ -272,9 +273,9 @@ private:
     flair::gui::DoubleSpinBox *safety_margin_;
     flair::gui::DoubleSpinBox *replan_period_;
     flair::gui::SpinBox *num_wp_spin_;
-    flair::gui::DoubleSpinBox *wp_x_[MAX_WAYPOINTS];
-    flair::gui::DoubleSpinBox *wp_y_[MAX_WAYPOINTS];
-    flair::gui::DoubleSpinBox *wp_z_[MAX_WAYPOINTS];
+    flair::gui::DoubleSpinBox *wp_x_[MAX_GUI_WAYPOINTS];
+    flair::gui::DoubleSpinBox *wp_y_[MAX_GUI_WAYPOINTS];
+    flair::gui::DoubleSpinBox *wp_z_[MAX_GUI_WAYPOINTS];
     flair::gui::PushButton *plan_button_;
     flair::gui::PushButton *execute_button_;
     flair::gui::PushButton *stop_button_;
@@ -288,6 +289,62 @@ private:
     Eigen::Vector3d EvalVel(double t) const;
     Eigen::Vector3d EvalAcc(double t) const;
     Eigen::Vector3d EvalJer(double t) const;
+
+    // -------------------------------------------------------
+    // Obstacle avoidance pipeline (inline grid/JPS/SFC)
+    // -------------------------------------------------------
+
+    // Workspace bounds (NED: z negative = up, ground at z=0)
+    static const double WS_X_MIN;
+    static const double WS_X_MAX;
+    static const double WS_Y_MIN;
+    static const double WS_Y_MAX;
+    static const double WS_Z_MIN;  // ceiling (most negative z = highest altitude)
+    static const double WS_Z_MAX;  // ground at z=0
+
+    // 3D occupancy grid (flat uint8_t array, row-major: ix * ny*nz + iy*nz + iz)
+    std::vector<uint8_t> grid_data_;
+    int grid_nx_, grid_ny_, grid_nz_;
+    double grid_res_;
+    Eigen::Vector3d grid_origin_;
+
+    void InitGrid(double res);
+    void ClearGrid();
+    void MarkSphereOccupied(const Eigen::Vector3d &center, double radius);
+    bool IsOccupied(int ix, int iy, int iz) const;
+    bool IsOccupiedWorld(const Eigen::Vector3d &pos) const;
+    bool GridInBounds(int ix, int iy, int iz) const;
+    Eigen::Vector3i WorldToGrid(const Eigen::Vector3d &pos) const;
+    Eigen::Vector3d GridToWorld(int ix, int iy, int iz) const;
+    bool IsSegmentFree(const Eigen::Vector3d &a, const Eigen::Vector3d &b) const;
+
+    // Build occupancy grid from current obstacles + ground plane
+    void BuildOccupancyGrid();
+
+    // A* path search on occupancy grid (26-connectivity)
+    bool FindPath(const Eigen::Vector3d &start, const Eigen::Vector3d &goal,
+                  std::vector<Eigen::Vector3d> &path);
+    std::vector<Eigen::Vector3d> SimplifyPath(const std::vector<Eigen::Vector3d> &input) const;
+
+    // Safe Flight Corridor (AABB per segment)
+    struct Corridor {
+        Eigen::Vector3d lo, hi;  // AABB bounds
+        bool contains(const Eigen::Vector3d &p) const {
+            return p.x() >= lo.x() && p.x() <= hi.x() &&
+                   p.y() >= lo.y() && p.y() <= hi.y() &&
+                   p.z() >= lo.z() && p.z() <= hi.z();
+        }
+    };
+    bool BuildCorridors(const std::vector<Eigen::Vector3d> &path,
+                        double margin,
+                        std::vector<Corridor> &corridors);
+
+    // Corridor-constrained min-snap (iterative project-and-insert)
+    bool SolveMinSnapConstrained(const std::vector<Eigen::Vector3d> &waypoints,
+                                  const std::vector<Corridor> &corridors);
+
+    // Full pipeline: grid → JPS → SFC → constrained min-snap
+    bool PlanWithObstacleAvoidance();
 };
 
 #endif // TRAJECTORY_MANAGER_H

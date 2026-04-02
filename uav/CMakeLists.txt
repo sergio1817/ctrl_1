@@ -39,14 +39,12 @@ SET(FLAIR_USE_VRPN TRUE)
 include($ENV{FLAIR_ROOT}/flair-src/cmake-modules/GlobalCmakeFlair.cmake)
 #include($ENV{FLAIR_ROOT}/flair-dev/cmake-modules/GlobalCmakeFlair.cmake)
 
-#SET(CTRL1_SIZE_OPTIMIZE=ON)
-
-# option(CTRL1_SIZE_OPTIMIZE "Optimize for size in release builds" OFF)
-# if(CTRL1_SIZE_OPTIMIZE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo|MinSizeRel")
-# 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Os -ffunction-sections -fdata-sections")
-# 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Os -ffunction-sections -fdata-sections")
-# 	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
-# endif()
+option(CTRL1_SIZE_OPTIMIZE "Optimize for size in release builds" ON)
+if(CTRL1_SIZE_OPTIMIZE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo|MinSizeRel")
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Os -ffunction-sections -fdata-sections")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Os -ffunction-sections -fdata-sections")
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
+endif()
 
 
 SET(SRC_FILES
