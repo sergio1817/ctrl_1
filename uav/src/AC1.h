@@ -57,6 +57,18 @@ public:
     void Reset() override;
     void UseDefaultPlot(const flair::gui::LayoutPosition *position) override;
     void UseDefaultPlot2(const flair::gui::LayoutPosition *position);
+
+    /*!
+     * \brief Analytical time derivative of the Actor output Ŷr = Ŵa^T σa.
+     *
+     * Computes  Ẏ̂r = Ẇa^T σa + Ŵa^T σ̇a   exactly, using:
+     *   Ẇa  from the adaptation law (3.81),
+     *   σ̇a  = diag(σa⊙(1−σa)) Va^T [0; Sr].
+     *
+     * Must be called AFTER Update() so that the internal variables
+     * (W_a, sigma_Va_last_, Wap_last_, Sr_last_) are current.
+     */
+    Eigen::Vector3f NNaDot() const;
     
 
 
@@ -124,7 +136,11 @@ private:
     float NNc = 0.0F;
 
     Eigen::Vector3f NNa = Eigen::Vector3f::Zero();
-    
+
+    /* Cached intermediates for analytical Ẏr computation */
+    Eigen::Matrix<float, 10, 1> sigma_Va_last_;   ///< σa(Va^T χa) from last updateActor
+    Eigen::Matrix<float, 10, 3> Wap_last_;         ///< Ẇa from last updateActor
+    Eigen::Vector3f Sr_last_;                       ///< Sr from last updateActor
     
 };
 } // end namespace filter

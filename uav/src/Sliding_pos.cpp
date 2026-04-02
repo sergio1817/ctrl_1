@@ -492,17 +492,11 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         // ṡp = ṡqp + γp * σ̇p
         Eigen::Vector3f sp_dot = sqp_dot + gammap_v.cwiseProduct(sgnpos_p);
 
-        // Ẏ̂r ≈ backward difference (NNap is from current step, NNap_prev from previous)
-        Eigen::Vector3f NNap_dot = Eigen::Vector3f::Zero();
-        if (delta_t > kEps) {
-            NNap_dot = (NNap - NNap_prev) / static_cast<float>(delta_t);
-        }
+        // Ẏ̂r = Ẇa^T σa + Ŵa^T σ̇a  (exact analytical, from AC2)
+        Eigen::Vector3f NNap_dot = ac2->NNaDot();
 
         // u̇ = -Kp * ṡp + Ẏ̂r
         up = -Kpv.cwiseProduct(sp_dot) + NNap_dot;
-
-        // Store current NNap for next iteration
-        NNap_prev = NNap;
 
     }else{
         const float safe_m = (std::abs(m_val) < kEps) ? (m_val >= 0.0F ? kEps : -kEps) : m_val;

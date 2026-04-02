@@ -90,7 +90,10 @@ AC1::AC1(const GroupBox *position, string name): ControlLaw(position, name, 3), 
     //W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
 
     W_c << 0.1F, 0.23F, 0.54F, 0.98F, 0.464F, 0.176F, 0.584F, 0.045F, 1.0F, 0.2F;
-    
+
+    sigma_Va_last_.setZero();
+    Wap_last_.setZero();
+    Sr_last_.setZero();
 }
 
 AC1::~AC1() {}
@@ -128,6 +131,10 @@ void AC1::Reset() {
 
     NNa = Eigen::Vector3f::Zero();
     NNc = 0.0F;
+
+    sigma_Va_last_.setZero();
+    Wap_last_.setZero();
+    Sr_last_.setZero();
 
     V_a << 0.6557F, 0.8235F, 0.2760F, 0.9593F, 0.3517F, 0.1299F, 0.4505F, 0.8687F, 0.8530F, 0.4893F,
             0.0357F, 0.6948F, 0.6797F, 0.5472F, 0.8308F, 0.5688F, 0.0838F, 0.0844F, 0.6221F, 0.3377F,
@@ -274,6 +281,11 @@ void AC1::updateActor(const Eigen::Vector3f& Sr) {
         return;
     }
 
+    /* Cache intermediates for analytical Ẏr computation */
+    Wap_last_ = external_term + decay_coeff * W_a;   // Ẇa ≈ f(W_a_k) before midpoint
+    sigma_Va_last_ = sigmoid_Va;
+    Sr_last_ = Sr;
+
     W_a = W_a_next;
     this->NNa = NNa1;
 }
@@ -369,6 +381,53 @@ void AC1::antiWindup(const Eigen::Vector3f& e) {
 
 }
 
+
+Eigen::Vector3f AC1::NNaDot() const {
+    /*  Ẏ̂r = Ẇa^T σa  +  Ŵa^T σ̇a
+     *
+     *  Term 1: Ẇa^T σa
+     *    Ẇa (10x3) is cached as Wap_last_
+     *    σa  (10x1) is cached as sigma_Va_last_
+     *    → Ẇa^T σa = (10x3)^T (10x1) = (3x1)
+     *
+     *  Term 2: Ŵa^T σ̇a
+     *    σ̇a = diag(σa ⊙ (1−σa)) · Va^T · χ̇a
+     *    where χ̇a = [0; Sr]  (4x1)
+     *    σa ⊙ (1−σa) is the sigmoid derivative  (element-wise, 10x1)
+     *    Va^T (10x4) · χ̇a (4x1) = (10x1)
+     *    → σ̇a = (σa ⊙ (1−σa)) ⊙ (Va^T χ̇a)   (10x1, element-wise)
+     *    → Ŵa^T σ̇a = (10x3)^T (10x1) = (3x1)
+     */
+
+    /* Term 1: Ẇa^T σa */
+    Eigen::Vector3f term1 = Wap_last_.transpose() * sigma_Va_last_;
+
+    /* Term 2: Ŵa^T σ̇a */
+    /* χ̇a = [0; Sr_last_] */
+    Eigen::Vector4f chi_a_dot;
+    chi_a_dot << 0.0F, Sr_last_;
+
+    /* Va^T χ̇a  (10x1) */
+    Eigen::Matrix<float, 10, 1> Va_T_chi_dot = V_a.transpose() * chi_a_dot;
+
+    /* σ'(x) = σ(x) ⊙ (1 − σ(x))  for the sigmoid s=(1-exp(-x))/(1+exp(-x))
+     * Note: for this sigmoid, σ'(x) = (1 − σ²(x)) / 2
+     * since σ(x) = tanh(x/2)*... actually let's be precise.
+     * sigmoid1(x) = (1-exp(-x))/(1+exp(-x)) = tanh(x/2)
+     * d/dx tanh(x/2) = (1/2) sech²(x/2) = (1/2)(1 - tanh²(x/2))
+     *                = (1 - σ²) / 2
+     */
+    Eigen::Array<float, 10, 1> sigma_arr = sigma_Va_last_.array();
+    Eigen::Array<float, 10, 1> sigma_deriv = 0.5F * (1.0F - sigma_arr * sigma_arr);
+
+    /* σ̇a = sigma_deriv ⊙ (Va^T χ̇a) */
+    Eigen::Matrix<float, 10, 1> sigma_dot = (sigma_deriv * Va_T_chi_dot.array()).matrix();
+
+    /* Ŵa^T σ̇a */
+    Eigen::Vector3f term2 = W_a.transpose() * sigma_dot;
+
+    return term1 + term2;
+}
 
 } // end namespace filter
 } // end namespace flair
