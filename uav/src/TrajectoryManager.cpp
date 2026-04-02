@@ -119,6 +119,9 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
     grid_res_spin_ = new DoubleSpinBox(grid_box->NewRow(), "Grid resolution", " m", 0.05, 0.5, 0.05, 2);
     ws_xy_range_ = new DoubleSpinBox(grid_box->LastRowLastCol(), "XY range", " m", 1.0, 10.0, 0.5, 1);
     ws_z_max_alt_ = new DoubleSpinBox(grid_box->LastRowLastCol(), "Max altitude", " m", 0.5, 5.0, 0.5, 1);
+    // Note: default values come from the XML config file. On first run
+    // (no XML), Flair uses the minimum value of the range as default.
+    // The user should set XY range >= 5 and Max altitude >= 3 for typical use.
 
     // Waypoint count
     num_wp_spin_ = new SpinBox(settings_box_->NewRow(), "Num waypoints", 2, MAX_GUI_WAYPOINTS, 1);
@@ -408,13 +411,39 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
         obstacles_[i].radius = obs_r;
     }
 
-    // Reinitialize grid with current GUI resolution and workspace
+    // Reinitialize grid — auto-expand workspace to cover all waypoints + margin
     double res = grid_res_spin_->Value();
     double xy_range = ws_xy_range_->Value();
     double z_alt = ws_z_max_alt_->Value();
     WS_X_MIN = -xy_range;  WS_X_MAX = xy_range;
     WS_Y_MIN = -xy_range;  WS_Y_MAX = xy_range;
     WS_Z_MIN = -z_alt;     WS_Z_MAX = 0.0;
+
+    // Auto-expand workspace to include all waypoints and obstacles with margin
+    double expand_margin = 2.0; // 2m padding around all points
+    for (int i = 0; i < num_waypoints_; ++i) {
+        if (waypoints_[i].x() - expand_margin < WS_X_MIN) WS_X_MIN = waypoints_[i].x() - expand_margin;
+        if (waypoints_[i].x() + expand_margin > WS_X_MAX) WS_X_MAX = waypoints_[i].x() + expand_margin;
+        if (waypoints_[i].y() - expand_margin < WS_Y_MIN) WS_Y_MIN = waypoints_[i].y() - expand_margin;
+        if (waypoints_[i].y() + expand_margin > WS_Y_MAX) WS_Y_MAX = waypoints_[i].y() + expand_margin;
+        if (waypoints_[i].z() - expand_margin < WS_Z_MIN) WS_Z_MIN = waypoints_[i].z() - expand_margin;
+    }
+    for (int i = 0; i < num_obstacles_; ++i) {
+        double r = obstacles_[i].radius + 1.0;
+        if (obstacles_[i].pos.x() - r < WS_X_MIN) WS_X_MIN = obstacles_[i].pos.x() - r;
+        if (obstacles_[i].pos.x() + r > WS_X_MAX) WS_X_MAX = obstacles_[i].pos.x() + r;
+        if (obstacles_[i].pos.y() - r < WS_Y_MIN) WS_Y_MIN = obstacles_[i].pos.y() - r;
+        if (obstacles_[i].pos.y() + r > WS_Y_MAX) WS_Y_MAX = obstacles_[i].pos.y() + r;
+    }
+
+    // Clamp grid resolution so grid doesn't get too large (max ~500K cells)
+    double vol = (WS_X_MAX-WS_X_MIN) * (WS_Y_MAX-WS_Y_MIN) * (WS_Z_MAX-WS_Z_MIN);
+    double min_res = std::pow(vol / 500000.0, 1.0/3.0);
+    if (res < min_res) {
+        Info("auto-increasing grid resolution from %.2f to %.2f to fit workspace\n", res, min_res);
+        res = min_res;
+    }
+
     InitGrid(res);
 
     // Use full obstacle avoidance pipeline if enabled and obstacles present
@@ -846,6 +875,39 @@ Eigen::Vector3d TrajectoryManager::GridToWorld(int ix, int iy, int iz) const {
         grid_origin_.z() + (iz + 0.5) * grid_res_);
 }
 
+void TrajectoryManager::MarkCylinderOccupied(double cx, double cy, double radius) {
+    // Mark a vertical cylinder (full Z extent) as occupied
+    // This is the correct model for indoor obstacles (poles, people, objects)
+    // which block the entire vertical column
+    Eigen::Vector3d lo_pt(cx - radius, cy - radius, WS_Z_MIN);
+    Eigen::Vector3d hi_pt(cx + radius, cy + radius, WS_Z_MAX);
+    Eigen::Vector3i lo = WorldToGrid(lo_pt);
+    Eigen::Vector3i hi = WorldToGrid(hi_pt);
+
+    int ix0 = std::max(lo.x(), 0);
+    int iy0 = std::max(lo.y(), 0);
+    int ix1 = std::min(hi.x(), grid_nx_ - 1);
+    int iy1 = std::min(hi.y(), grid_ny_ - 1);
+
+    double r2 = radius * radius;
+    for (int ix = ix0; ix <= ix1; ++ix) {
+        for (int iy = iy0; iy <= iy1; ++iy) {
+            Eigen::Vector3d vc = GridToWorld(ix, iy, 0);
+            double dx = vc.x() - cx;
+            double dy = vc.y() - cy;
+            if (dx*dx + dy*dy <= r2) {
+                // Mark entire Z column
+                for (int iz = 0; iz < grid_nz_; ++iz) {
+                    size_t idx = static_cast<size_t>(ix) * grid_ny_ * grid_nz_
+                               + static_cast<size_t>(iy) * grid_nz_
+                               + static_cast<size_t>(iz);
+                    grid_data_[idx] = 1u;
+                }
+            }
+        }
+    }
+}
+
 void TrajectoryManager::MarkSphereOccupied(const Eigen::Vector3d &center, double radius) {
     Eigen::Vector3i lo = WorldToGrid(center - Eigen::Vector3d(radius, radius, radius));
     Eigen::Vector3i hi = WorldToGrid(center + Eigen::Vector3d(radius, radius, radius));
@@ -914,9 +976,13 @@ void TrajectoryManager::BuildOccupancyGrid() {
         }
     }
 
-    // Mark each obstacle as inflated sphere (radius + safety_margin)
+    // Mark each obstacle as inflated vertical cylinder (radius + safety_margin)
+    // Cylinder model: obstacles block the full Z column (XY position only)
+    // This is correct for indoor obstacles (people, poles, objects on ground)
+    // whose OptiTrack z may be 0 (ground level) but they block at all altitudes
     for (int i = 0; i < num_obstacles_; ++i) {
-        MarkSphereOccupied(obstacles_[i].pos, obstacles_[i].radius + sm);
+        MarkCylinderOccupied(obstacles_[i].pos.x(), obstacles_[i].pos.y(),
+                             obstacles_[i].radius + sm);
     }
 }
 

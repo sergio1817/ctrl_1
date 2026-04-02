@@ -316,6 +316,7 @@ private:
     void InitGrid(double res);
     void ClearGrid();
     void MarkSphereOccupied(const Eigen::Vector3d &center, double radius);
+    void MarkCylinderOccupied(double cx, double cy, double radius);
     bool IsOccupied(int ix, int iy, int iz) const;
     bool IsOccupiedWorld(const Eigen::Vector3d &pos) const;
     bool GridInBounds(int ix, int iy, int iz) const;
