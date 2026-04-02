@@ -313,6 +313,10 @@ private:
     double grid_res_;
     Eigen::Vector3d grid_origin_;
 
+    // Pre-allocated A* arrays (resized in InitGrid, reused in FindPath)
+    std::vector<float> astar_gcost_;
+    std::vector<int>   astar_parent_;
+
     void InitGrid(double res);
     void ClearGrid();
     void MarkSphereOccupied(const Eigen::Vector3d &center, double radius);

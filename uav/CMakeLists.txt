@@ -39,11 +39,11 @@ SET(FLAIR_USE_VRPN TRUE)
 include($ENV{FLAIR_ROOT}/flair-src/cmake-modules/GlobalCmakeFlair.cmake)
 #include($ENV{FLAIR_ROOT}/flair-dev/cmake-modules/GlobalCmakeFlair.cmake)
 
-option(CTRL1_SIZE_OPTIMIZE "Optimize for size in release builds" ON)
-if(CTRL1_SIZE_OPTIMIZE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo|MinSizeRel")
+option(CTRL1_SIZE_OPTIMIZE "Optimize for size (AR.Drone 2.0: ARM Cortex-A8, 256MB)" ON)
+if(CTRL1_SIZE_OPTIMIZE)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Os -ffunction-sections -fdata-sections")
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Os -ffunction-sections -fdata-sections")
-	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections -Wl,-s")
 endif()
 
 

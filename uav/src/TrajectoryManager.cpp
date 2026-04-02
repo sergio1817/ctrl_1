@@ -31,12 +31,12 @@
 #include <TabWidget.h>
 #include <Thread.h>
 #include <Vector3D.h>
-#include <Eigen/Dense>
+#include <Eigen/Core>
+#include <Eigen/LU>
 #include <cmath>
 #include <algorithm>
 #include <cstring>
 #include <queue>
-#include <unordered_map>
 #include <limits>
 
 using std::string;
@@ -436,9 +436,9 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
         if (obstacles_[i].pos.y() + r > WS_Y_MAX) WS_Y_MAX = obstacles_[i].pos.y() + r;
     }
 
-    // Clamp grid resolution so grid doesn't get too large (max ~500K cells)
+    // Clamp grid resolution so grid doesn't get too large (max ~150K cells)
     double vol = (WS_X_MAX-WS_X_MIN) * (WS_Y_MAX-WS_Y_MIN) * (WS_Z_MAX-WS_Z_MIN);
-    double min_res = std::pow(vol / 500000.0, 1.0/3.0);
+    double min_res = std::pow(vol / 150000.0, 1.0/3.0);
     if (res < min_res) {
         Info("auto-increasing grid resolution from %.2f to %.2f to fit workspace\n", res, min_res);
         res = min_res;
@@ -712,8 +712,8 @@ bool TrajectoryManager::SolveMinSnap() {
             row++;
         }
 
-        // Solve with Eigen (ColPivHouseholderQR for robustness)
-        Eigen::VectorXd c = A.colPivHouseholderQr().solve(b);
+        // Solve with PartialPivLU (faster for small systems, sufficient for degree-7 polynomials)
+        Eigen::VectorXd c = A.partialPivLu().solve(b);
 
         // Check solution quality
         double residual = (A * c - b).norm();
@@ -835,7 +835,10 @@ void TrajectoryManager::InitGrid(double res) {
     grid_nx_ = static_cast<int>(std::ceil((WS_X_MAX - WS_X_MIN) / res));
     grid_ny_ = static_cast<int>(std::ceil((WS_Y_MAX - WS_Y_MIN) / res));
     grid_nz_ = static_cast<int>(std::ceil((WS_Z_MAX - WS_Z_MIN) / res));
-    grid_data_.assign(static_cast<size_t>(grid_nx_) * grid_ny_ * grid_nz_, 0u);
+    size_t total = static_cast<size_t>(grid_nx_) * grid_ny_ * grid_nz_;
+    grid_data_.assign(total, 0u);
+    astar_gcost_.resize(total);
+    astar_parent_.resize(total);
 }
 
 void TrajectoryManager::ClearGrid() {
@@ -995,17 +998,23 @@ void TrajectoryManager::BuildOccupancyGrid() {
     double sm = safety_margin_->Value();
 
     // Mark ground plane: z >= -safety_margin is occupied (NED: z=0 is ground)
-    // In grid coords, this means voxels whose world z >= -sm
-    for (int ix = 0; ix < grid_nx_; ++ix) {
-        for (int iy = 0; iy < grid_ny_; ++iy) {
-            for (int iz = 0; iz < grid_nz_; ++iz) {
-                Eigen::Vector3d wc = GridToWorld(ix, iy, iz);
-                if (wc.z() >= -sm) {
-                    size_t idx = static_cast<size_t>(ix) * grid_ny_ * grid_nz_
-                               + static_cast<size_t>(iy) * grid_nz_
-                               + static_cast<size_t>(iz);
-                    grid_data_[idx] = 1u;
-                }
+    // Compute the iz threshold once, then memset entire z-slices
+    int iz_ground = -1;
+    for (int iz = 0; iz < grid_nz_; ++iz) {
+        double wz = grid_origin_.z() + (iz + 0.5) * grid_res_;
+        if (wz >= -sm) {
+            iz_ground = iz;
+            break;
+        }
+    }
+    if (iz_ground >= 0) {
+        int nz_ground = grid_nz_ - iz_ground;  // number of z cells to mark
+        for (int ix = 0; ix < grid_nx_; ++ix) {
+            for (int iy = 0; iy < grid_ny_; ++iy) {
+                size_t base = static_cast<size_t>(ix) * grid_ny_ * grid_nz_
+                            + static_cast<size_t>(iy) * grid_nz_
+                            + static_cast<size_t>(iz_ground);
+                std::memset(&grid_data_[base], 1u, static_cast<size_t>(nz_ground));
             }
         }
     }
@@ -1042,14 +1051,13 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
         return true;
     }
 
-    // Memory-efficient A* using flat arrays indexed by grid cell.
-    // Uses ~5 bytes/cell instead of ~80 bytes/cell with unordered_map.
+    // Memory-efficient A* using pre-allocated flat arrays (class members).
+    // Resized once in InitGrid(), reused across calls — no per-plan heap allocation.
     size_t N = static_cast<size_t>(grid_nx_) * grid_ny_ * grid_nz_;
 
-    // g-cost array (FLT_MAX = unvisited)
-    std::vector<float> g_cost(N, std::numeric_limits<float>::max());
-    // parent: flat index of parent cell (-1 = start)
-    std::vector<int> parent(N, -2);  // -2 = not visited
+    // Reset g-cost (FLT_MAX = unvisited) and parent (-2 = not visited)
+    std::fill(astar_gcost_.begin(), astar_gcost_.begin() + N, std::numeric_limits<float>::max());
+    std::fill(astar_parent_.begin(), astar_parent_.begin() + N, -2);
 
     struct PQEntry {
         float f;
@@ -1072,8 +1080,8 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
     float res_f = static_cast<float>(grid_res_);
     int start_cell = CELL_IDX(sx, sy, sz);
     int goal_cell = CELL_IDX(gx, gy, gz);
-    g_cost[start_cell] = 0.0f;
-    parent[start_cell] = -1;  // -1 = start node
+    astar_gcost_[start_cell] = 0.0f;
+    astar_parent_[start_cell] = -1;  // -1 = start node
     PQEntry se;
     se.f = eucDist(sx, sy, sz, gx, gy, gz) * res_f;
     se.cell = start_cell;
@@ -1107,7 +1115,7 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
         open_q.pop();
 
         int ci = top.cell;
-        if (top.f > g_cost[ci] + eucDist(ci / nyz, (ci % nyz) / grid_nz_, ci % grid_nz_,
+        if (top.f > astar_gcost_[ci] + eucDist(ci / nyz, (ci % nyz) / grid_nz_, ci % grid_nz_,
                                           gx, gy, gz) * res_f + 0.01f) {
             continue;  // stale entry
         }
@@ -1121,7 +1129,7 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
         int cx = ci / nyz;
         int cy = (ci % nyz) / grid_nz_;
         int cz = ci % grid_nz_;
-        float cur_g = g_cost[ci];
+        float cur_g = astar_gcost_[ci];
 
         for (int ni = 0; ni < 26; ++ni) {
             int nx_i = cx + offsets[ni][0];
@@ -1144,9 +1152,9 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
 
             int nb = CELL_IDX(nx_i, ny_i, nz_i);
             float new_g = cur_g + step_costs[ni] * res_f;
-            if (new_g < g_cost[nb]) {
-                g_cost[nb] = new_g;
-                parent[nb] = ci;
+            if (new_g < astar_gcost_[nb]) {
+                astar_gcost_[nb] = new_g;
+                astar_parent_[nb] = ci;
                 float h = eucDist(nx_i, ny_i, nz_i, gx, gy, gz) * res_f;
                 PQEntry e;
                 e.f = new_g + h;
@@ -1168,7 +1176,7 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
         int iy = (ci % nyz) / grid_nz_;
         int iz = ci % grid_nz_;
         raw_path.push_back(GridToWorld(ix, iy, iz));
-        ci = parent[ci];
+        ci = astar_parent_[ci];
     }
     std::reverse(raw_path.begin(), raw_path.end());
 
@@ -1445,15 +1453,8 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
 
     double sm = safety_margin_->Value();
 
-    // Diagnostic: log obstacle positions
     Info("obstacle avoidance: %d obstacles, safety_margin=%.2f, grid=%dx%dx%d (res=%.2f)\n",
          num_obstacles_, sm, grid_nx_, grid_ny_, grid_nz_, grid_res_);
-    for (int i = 0; i < num_obstacles_; ++i) {
-        Info("  obstacle[%d]: pos=(%.2f, %.2f, %.2f) r=%.2f inflated_r=%.2f occupied=%d\n",
-             i, obstacles_[i].pos.x(), obstacles_[i].pos.y(), obstacles_[i].pos.z(),
-             obstacles_[i].radius, obstacles_[i].radius + sm,
-             IsOccupiedWorld(obstacles_[i].pos) ? 1 : 0);
-    }
 
     // Step 2: Shift any waypoint that lands inside an obstacle to the nearest free cell
     for (int i = 0; i < num_waypoints_; ++i) {
@@ -1503,10 +1504,6 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
     }
 
     Info("obstacle avoidance: path has %d waypoints\n", static_cast<int>(full_path.size()));
-    for (size_t i = 0; i < full_path.size(); ++i) {
-        Info("  path[%d]: (%.2f, %.2f, %.2f)\n",
-             static_cast<int>(i), full_path[i].x(), full_path[i].y(), full_path[i].z());
-    }
 
     // Step 3: Build SFC corridors around path
     std::vector<Corridor> corridors;
