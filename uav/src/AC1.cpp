@@ -55,17 +55,6 @@ AC1::AC1(const GroupBox *position, string name): ControlLaw(position, name, 3), 
     //V_a = Eigen::Matrix<float, 4, 10>::Random(4,10);
     //V_c = Eigen::Matrix<float, 4, 10>::Random(4,10)*10.0F;    
 
-    // W_a << 0.15F, 0.3F, 0.5F,
-    //         0.34F, 0.85F, 0.67F,
-    //         0.27F, 0.83F, 0.87F,
-    //         0.97F, 0.47F, 0.62F,
-    //         0.74F, 0.38F, 0.31F,
-    //         0.93F, 0.16F, 0.24F,
-    //         0.26F, 0.27F, 0.72F,
-    //         0.05F, 0.42F, 0.69F,
-    //         0.49F, 0.75F, 0.43F,
-    //         0.83F, 0.92F, 0.98F;
-
     
     //W_c = Eigen::Matrix<float, 1, 10>::Random(1,10);
 
@@ -126,10 +115,13 @@ void AC1::Reset() {
     first_update = true;
 
     reward = 0.0F;
-    reward_int = 0.0F;
     gamma_val = 0.0F;
 
-    NNc_int = 0.0F;
+    /* Reset Kahan accumulators */
+    reward_kahan.value = 0.0F;
+    reward_kahan.compensation = 0.0F;
+    NNc_kahan.value = 0.0F;
+    NNc_kahan.compensation = 0.0F;
 
     int_s = Eigen::Vector3f::Zero();
     //int_s2 = Eigen::Vector3f::Zero();
@@ -164,18 +156,6 @@ void AC1::Reset() {
     W_a = W_a * 0.001F; // Scale down the initial weights for better learning stability
 
     W_c << 0.1F, 0.23F, 0.54F, 0.98F, 0.464F, 0.176F, 0.584F, 0.045F, 1.0F, 0.2F;
-
-    // state->GetMutex();
-    // for (int i = 0; i < 3; ++i) {
-    //     state->SetValueNoMutex(i, 0, 0.0F);
-    //     state->SetValueNoMutex(i, 1, 0.0F);
-    // }
-    // state->ReleaseMutex();
-
-    // output->SetValue(0, 0, 0);
-    // output->SetValue(1, 0, 0);
-    // output->SetValue(2, 0, 0);
-    
 
 }
 
@@ -221,12 +201,6 @@ void AC1::UpdateFrom(const io_data *data) {
         delta_t = 0.0F;
         first_update = false;
     }
-    // const float max_dt = 0.1F;
-    // if (delta_t < 0.0F) {
-    //     delta_t = 0.0F;
-    // } else if (delta_t > max_dt) {
-    //     delta_t = max_dt;
-    // }
 
     
     computeReward1(e, ep);
@@ -260,10 +234,6 @@ void AC1::updateActor(const Eigen::Vector3f& Sr) {
 
     
     int_s = rk4_const(int_s, delta_t, Sr);
-    //std::cout<<"int_s: " << int_s.transpose() << '\n';
-    //int_s2 = rk4_vec(int_s2, delta_t, [Sr](const Eigen::Vector3f&) { return Sr; });
-    //std::cout<<"int_s2: " << int_s2.transpose() << '\n';
-
 
     chi_a << 1, int_s;
 
@@ -272,26 +242,33 @@ void AC1::updateActor(const Eigen::Vector3f& Sr) {
         return;
     }
 
-    //std::cout<<"sigmoid_Va: " << sigmoid_Va.transpose() << '\n';
-
     const float gamma_val_local = gamma->Value();
     const float gr = gamma_val * reward;
     const float gr2 = gr * gr;
-    Eigen::Matrix<float, 10, 3> Wap = -gamma_val_local * (sigmoid_Va * Sr.transpose()) - gamma_val_local * W_a * gr2;
-    
-    
-    if (!Wap.allFinite()) {
-        return; 
-    }
 
-    Eigen::Matrix<float, 10, 3> W_a_next = rk4_const(W_a, delta_t, Wap);
-    //W_a = rk4_const(W_a, delta_t, Wap);
+    /* Implicit midpoint for W_a update:
+     * f(W) = -gamma_val_local * (sigmoid_Va * Sr^T) - gamma_val_local * W * gr2
+     * The term sigmoid_Va * Sr^T is independent of W (V_a is fixed).
+     * Capture needed values by reference/value for the lambda. */
+
+    typedef Eigen::Matrix<float, 10, 3> WaType;
+    const WaType external_term = -gamma_val_local * (sigmoid_Va * Sr.transpose());
+    const float decay_coeff = -gamma_val_local * gr2;
+    const double dt_local = delta_t;
+
+    /* 3 fixed-point iterations of implicit midpoint */
+    WaType W_a_mid = W_a;
+    for (int iter = 0; iter < 3; ++iter) {
+        WaType f_mid = external_term + decay_coeff * W_a_mid;
+        W_a_mid = W_a + static_cast<float>(0.5 * dt_local) * f_mid;
+    }
+    WaType W_a_next = 2.0f * W_a_mid - W_a;
+
     if (!W_a_next.allFinite()) {
         return;
     }
 
     Eigen::Vector3f NNa1 = W_a_next.transpose() * sigmoid_Va;
-    //Eigen::Vector3f NNa1 = W_a.transpose() * sigmoid_Va;
 
     if (!NNa1.allFinite()) {
         return;
@@ -299,8 +276,6 @@ void AC1::updateActor(const Eigen::Vector3f& Sr) {
 
     W_a = W_a_next;
     this->NNa = NNa1;
-
-    //NNa = W_a.transpose()*sigmoid_Va;
 }
 
 void AC1::computeReward1(const Eigen::Vector3f& e, const Eigen::Vector3f& ep) {
@@ -317,10 +292,14 @@ void AC1::computeTD(const float& NNc) {
 
     float psi = 1000.0F;
 
-    this->reward_int = rk4_const(this->reward_int, delta_t, reward);
-    NNc_int = rk4_const(NNc_int, delta_t, NNc);
+    /* Kahan-compensated integration for reward_int and NNc_int */
+    kahan_integrate(reward_kahan, delta_t, reward);
+    kahan_integrate(NNc_kahan, delta_t, NNc);
 
-    gamma_val = NNc + ((1/psi)*NNc_int) + this->reward_int;
+    float reward_int = reward_kahan.value;
+    float NNc_int = NNc_kahan.value;
+
+    gamma_val = NNc + ((1/psi)*NNc_int) + reward_int;
     
 }
 
@@ -343,32 +322,36 @@ void AC1::updateCritic(const Eigen::Vector3f& e) {
         return;
     }
 
-    Eigen::Matrix<float, 10, 1> sigmoid_Wc = sigmoid1(W_c).matrix();
-    if (!sigmoid_Wc.allFinite()) {
-        return;
-    }
-
     const float inv_denom = 1.0F / denom;
-    Eigen::Matrix<float, 10, 1> Wcp = -kw_val * sigmoid_Wc - K_val * sigmoid11(gamma_val) * (sigmoid_Va * inv_denom);
-    if (!Wcp.allFinite()) {
-        return;
-    }
+    const float sig_gamma = sigmoid11(gamma_val);
+    const double dt_local = delta_t;
 
-    //W_c = rk4_const(W_c, delta_t, Wcp);
-    Eigen::Matrix<float, 10, 1> W_c_next = rk4_const(W_c, delta_t, Wcp);
+    /* Implicit midpoint for W_c update:
+     * f(W_c) = -kw_val * sigmoid1(W_c) - K_val * sig_gamma * (sigmoid_Va * inv_denom)
+     * sigmoid1(W_c) depends on W_c, so we must recompute at the midpoint. */
+
+    typedef Eigen::Matrix<float, 10, 1> WcType;
+    const WcType external_term = -K_val * sig_gamma * (sigmoid_Va * inv_denom);
+
+    WcType W_c_mid = W_c;
+    for (int iter = 0; iter < 3; ++iter) {
+        WcType sigmoid_Wc_mid = sigmoid1(W_c_mid).matrix();
+        WcType f_mid = -kw_val * sigmoid_Wc_mid + external_term;
+        W_c_mid = W_c + static_cast<float>(0.5 * dt_local) * f_mid;
+    }
+    WcType W_c_next = 2.0f * W_c_mid - W_c;
+
     if (!W_c_next.allFinite()) {
         return;
     }
 
-    float NNc1 =  (W_c_next.transpose() * sigmoid_Va)(0,0);
-    //float NNc1 =  (W_c.transpose() * sigmoid_Va)(0,0);
+    float NNc1 = (W_c_next.transpose() * sigmoid_Va)(0,0);
     if (!std::isfinite(NNc1)) {
         return;
     }
 
     W_c = W_c_next;
     this->NNc = NNc1;
-    //std::cout<<"NNc: " << NNc << '\n';
 
 }
 
@@ -383,10 +366,6 @@ void AC1::antiWindup(const Eigen::Vector3f& e) {
         Reset();
         return;
     }
-
-    // if (saturate(NNa, min_val, max_val) ) {
-    //     //Reset();
-    // };
 
 }
 

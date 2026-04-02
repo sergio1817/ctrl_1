@@ -123,6 +123,10 @@ private:
     
     bool first_update;
     
+    /* Kahan-compensated accumulators for sgnpos and sgnori */
+    KahanState<Eigen::Vector3f> sgnpos_kahan;
+    KahanState<Eigen::Vector3f> sgnori_kahan;
+
     Eigen::Vector3f sgnpos_p, sgnpos, sgnori_p, sgnori;
 
     Eigen::Matrix3f I = Eigen::Matrix3f::Identity(3,3);

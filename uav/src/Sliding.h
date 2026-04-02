@@ -98,6 +98,9 @@ private:
     
     bool first_update;
     
+    /* Kahan-compensated accumulator for sgnori */
+    KahanState<Eigen::Vector3f> sgnori_kahan;
+
     Eigen::Vector3f sgnori_p, sgnori;
     Eigen::Vector3f nu_t0;
 

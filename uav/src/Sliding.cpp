@@ -108,18 +108,15 @@ void Sliding::Reset(void) {
     sgnori_p << 0,0,0;
     sgnori << 0,0,0;
 
+    /* Reset Kahan accumulator */
+    sgnori_kahan.value.setZero();
+    sgnori_kahan.compensation.setZero();
+
     state->GetMutex();
     for (int i = 0; i < 7; ++i) {
         state->SetValueNoMutex(i, 0, 0.0F);
     }
     // state->ReleaseMutex();
-
-    // output->SetValue(0, 0, 0.0F);
-    // output->SetValue(1, 0, 0.0F);
-    // output->SetValue(2, 0, 0.0F);
-    // output->SetValue(3, 0, 0.0F);
-//    pimpl_->i = 0;
-//    pimpl_->first_update = true;
 }
 
 void Sliding::SetValues(float ze, float zp, Vector3Df w, Vector3Df wd, Quaternion q, Quaternion qd){
@@ -296,7 +293,9 @@ void Sliding::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nuq = nu-nud;
 
     sgnori_p = signth(nuq,p_val);
-    sgnori = rk4_const(sgnori, delta_t, sgnori_p);
+    /* Kahan-compensated integration for sgnori */
+    kahan_integrate(sgnori_kahan, static_cast<double>(delta_t), sgnori_p);
+    sgnori = sgnori_kahan.value;
 
     Eigen::Vector3f nur = nuq + gammao_v.cwiseProduct(sgnori);
 

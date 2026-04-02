@@ -118,7 +118,7 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     Kp_y = new DoubleSpinBox(pos->LastRowLastCol(), "Kp_y:", 0, 50000, 0.5, 3);
     Kp_z = new DoubleSpinBox(pos->LastRowLastCol(), "Kp_z:", 0, 50000, 0.5, 3);
     
-    
+
 
     sat_r = new DoubleSpinBox(mot->NewRow(), "sat roll:", 0, 1, 0.1);
     sat_p = new DoubleSpinBox(mot->LastRowLastCol(), "sat pitch:", 0, 1, 0.1);
@@ -171,72 +171,21 @@ void Sliding_pos::Reset(void) {
     sgnpos_p = Eigen::Vector3f::Zero();
     sgnpos = Eigen::Vector3f::Zero();
 
+    /* Reset Kahan accumulators */
+    sgnpos_kahan.value.setZero();
+    sgnpos_kahan.compensation.setZero();
+    sgnori_kahan.value.setZero();
+    sgnori_kahan.compensation.setZero();
+
     levant.Reset();
     levant3.Reset();
     ac1->Reset();
     ac2->Reset();
 
     dum = 0.0F;
-
-    // state->GetMutex();
-    // for (int i = 0; i < 26; ++i) {
-    //     state->SetValueNoMutex(i, 0, 0.0F);
-    // }
-    // state->ReleaseMutex();
-
-    // output->SetValue(0, 0, 0.0F);
-    // output->SetValue(1, 0, 0.0F);
-    // output->SetValue(2, 0, 0.0F);
-    // output->SetValue(3, 0, 0.0F);
-
-    
-
-    // sgnpos2 = Vector3ff(0,0,0);
-    // sgn2 = Vector3ff(0,0,0);
-
-    // sgnpos << 0,0,0;
-    // sgn << 0,0,0;
-
-
-
-//    pimpl_->i = 0;
-//    pimpl_->first_update = true;
 }
 
 void Sliding_pos::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector3Df xidpp, Vector3Df xidppp, Vector3Df w, Quaternion q){
-
-    // float xe = xie.x;
-    // float ye = xie.y;
-    // float ze = xie.z;
-
-    // float xep = xiep.x;
-    // float yep = xiep.y;
-    // float zep = xiep.z;
-
-    // float xd = xid.x;
-    // float yd = xid.y;
-    // float zd = xid.z;
-
-    // float xdp = xidp.x;
-    // float ydp = xidp.y;
-    // float zdp = xidp.z;
-
-    // float xdpp = xidpp.x;
-    // float ydpp = xidpp.y;
-    // float zdpp = xidpp.z;
-
-    // float xdppp = xidppp.x;
-    // float ydppp = xidppp.y;
-    // float zdppp = xidppp.z;
-
-    // float wex = we.x;
-    // float wey = we.y;
-    // float wez = we.z;
-
-    // float q0 = q.q0;
-    // float q1 = q.q1;
-    // float q2 = q.q2;
-    // float q3 = q.q3;
 
     input->SetValue(0, 0, xie.x);
     input->SetValue(1, 0, xie.y);
@@ -266,23 +215,6 @@ void Sliding_pos::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector
     input->SetValue(1, 7, q.q1);
     input->SetValue(2, 7, q.q2);
     input->SetValue(3, 7, q.q3);
-
-
-//   input->SetValue(0, 0, ze);
-//   input->SetValue(1, 0, wex);
-//   input->SetValue(2, 0, wey);
-//   input->SetValue(3, 0, wez);
-//   input->SetValue(4, 0, zp);
-
-//   input->SetValue(0, 1, q0);
-//   input->SetValue(1, 1, q1);
-//   input->SetValue(2, 1, q2);
-//   input->SetValue(3, 1, q3);
-
-//   input->SetValue(0, 2, qd0);
-//   input->SetValue(1, 2, qd1);
-//   input->SetValue(2, 2, qd2);
-//   input->SetValue(3, 2, qd3);
 }
 
 void Sliding_pos::UseDefaultPlot(const LayoutPosition *position) {
@@ -488,12 +420,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nup = nup1 - nupd;
 
     sgnpos_p = signth(nup,p1);
-    //sgnpos_p = Eigen::Vector3f(std::cos(tactual),0,0);
-    sgnpos = rk4_const(sgnpos, delta_t, sgnpos_p);
-    //sgnpos = rk4_eigen(sgnpos, delta_t, sgnpos_p);
-    //dum = rk4o(function1d, dum, sgnpos_p(0), delta_t);
-    //dum = rk4_const(dum, delta_t, sgnpos_p(0));
-    //sgnpos(2) = dum;
+    /* Kahan-compensated integration for sgnpos */
+    kahan_integrate(sgnpos_kahan, delta_t, sgnpos_p);
+    sgnpos = sgnpos_kahan.value;
 
 
 
@@ -527,12 +456,6 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Lambpv(0) = p1 / (c0 * c0);
     Lambpv(1) = p1 / (c1 * c1);
     Lambpv(2) = p1 / (c2 * c2);
-
-    //Eigen::Vector3f vec(sin(tactual), sin(tactual), sin(tactual));
-
-    // float f = gammap->Value()*sin(alphap->Value()*tactual);
-    // float alpha2 = Kp->Value();
-    // float lamb = Kd->Value();
 
     
 
@@ -587,74 +510,25 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     Quaternion qd2 = Quaternion(qd.w(),qd.x(),qd.y(),qd.z());
     Euler eta = qd2.ToEuler();
-    // Eigen::Vector3f eta = qd.toRotationMatrix().eulerAngles(0, 1, 2);
 
     const Eigen::Quaternionf qd_conj = qd.conjugate();
     
     
-    // input = dynamic_cast<const Matrix*>(data);
-  
-    // if (!input) {
-    //     Warn("casting %s to Matrix failed\n",data->ObjectName().c_str(),TIME_INFINITE);
-    //     return;
-    // }
-
-
-    // input->GetMutex();
-
-    // Eigen::Vector3f w(input->ValueNoMutex(0, 6),input->ValueNoMutex(1, 6),input->ValueNoMutex(2, 6));
-
-    // q = Eigen::Quaternionf(input->ValueNoMutex(0, 7),input->ValueNoMutex(1, 7),input->ValueNoMutex(2, 7),input->ValueNoMutex(3, 7));
-    
-    // input->ReleaseMutex();
-
-    
-    // if (q.norm() > kEps) {
-    //     q.normalize();
-    // }
-    
-    
     Eigen::Quaternionf qe = q * qd_conj;
-
-    //std::cout<<"qe: " << qe.coeffs() << std::endl;
-
-    // Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
-    //                     -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
-    //                     (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
 
     Eigen::Vector3f wd = 2.0F*(qd_conj*qdp).vec();
 
     saturate(wd, Eigen::Vector3f(-1,-1,-1), Eigen::Vector3f(1,1,1));
 
-    //std::cout<<"w: " << w << std::endl;
-    //std::cout<<"wd: " << wd << std::endl;
-
     
-
-    //flair::core::Time dt_pos = GetTime() - t0_p;
-
-    //lp->SetText("Latecia pos: %.3f ms",(float)dt_pos/1000000);
-
-    //flair::core::Time t0_o = GetTime();
 
     Eigen::Vector3f we = w - wd;
 
-    //Printf("We: %f\t %f\t %f\n", we(0), we(1), we(2));
-
-    //std::cout<<"we: " << we << std::endl;
-
-    //Eigen::Vector3f QdTqe3 = (qd.conjugate()*qe*qd).vec();
-    //Eigen::Vector3f QdTqe3 = qd.toRotationMatrix().transpose()*qe.vec();
     Eigen::Vector3f QdTqe3 = qd_conj._transformVector(qe.vec());
-
-    //std::cout<<"QdTqe3: " << QdTqe3.coeffs() << std::endl;
 
     Eigen::Vector3f nu = we + alphao_v.cwiseProduct(QdTqe3);
 
-    //std::cout<<"nu: " << nu << std::endl;
     
-    //Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
-
     if (first_update) {
         nu_t0 = nu;
         first_update = false;
@@ -665,7 +539,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nuq = nu-nud;
 
     sgnori_p = signth(nuq,p_val);
-    sgnori = rk4_const(sgnori, delta_t, sgnori_p);
+    /* Kahan-compensated integration for sgnori */
+    kahan_integrate(sgnori_kahan, delta_t, sgnori_p);
+    sgnori = sgnori_kahan.value;
 
     Eigen::Vector3f nur = nuq + gammao_v.cwiseProduct(sgnori);
 
@@ -682,12 +558,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     //saturate(tau, Eigen::Vector3f(-0.5,-0.5,-0.8), Eigen::Vector3f(0.5,0.5,0.8));
 
-    //std::cout<<"tau: " << tau.transpose() << std::endl;
-
-
-    //flair::core::Time dt_ori = GetTime() - t0_o;
-
-    //lo->SetText("Latecia ori: %.3f ms",(float)dt_ori/1000000);
+    
 
     
     tau_roll = (float)tau(0)/km_val;
