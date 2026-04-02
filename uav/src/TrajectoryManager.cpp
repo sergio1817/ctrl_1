@@ -115,9 +115,11 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position, string name
 
     // --------------------------------------------------------
     // DataPlots for trajectory visualization
+    // (Use main_box->NewRow() for layout positions — the original
+    //  'position' was consumed by the GroupBox constructor above)
     // --------------------------------------------------------
     // 2D XY trajectory plot
-    DataPlot2D *xy_plot = new DataPlot2D(position, "XY Trajectory",
+    DataPlot2D *xy_plot = new DataPlot2D(main_box->NewRow(), "XY Trajectory",
                                           "X [m]", -3, 3,
                                           "Y [m]", -3, 3);
     xy_plot->AddCurve(output_matrix_->Element(0, 0),
@@ -125,23 +127,23 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position, string name
                       DataPlot::Red, "desired");
 
     // 1D position plots
-    DataPlot1D *pos_x_plot = new DataPlot1D(position, "Desired X", -3, 3);
+    DataPlot1D *pos_x_plot = new DataPlot1D(main_box->NewRow(), "Desired X", -3, 3);
     pos_x_plot->AddCurve(output_matrix_->Element(0, 0), DataPlot::Red, "des_x");
 
-    DataPlot1D *pos_y_plot = new DataPlot1D(position, "Desired Y", -3, 3);
+    DataPlot1D *pos_y_plot = new DataPlot1D(main_box->LastRowLastCol(), "Desired Y", -3, 3);
     pos_y_plot->AddCurve(output_matrix_->Element(1, 0), DataPlot::Green, "des_y");
 
-    DataPlot1D *pos_z_plot = new DataPlot1D(position, "Desired Z", -3, 0);
+    DataPlot1D *pos_z_plot = new DataPlot1D(main_box->LastRowLastCol(), "Desired Z", -3, 0);
     pos_z_plot->AddCurve(output_matrix_->Element(2, 0), DataPlot::Blue, "des_z");
 
     // Velocity plot
-    DataPlot1D *vel_plot = new DataPlot1D(position, "Desired Vel", -5, 5);
+    DataPlot1D *vel_plot = new DataPlot1D(main_box->NewRow(), "Desired Vel", -5, 5);
     vel_plot->AddCurve(output_matrix_->Element(3, 0), DataPlot::Red, "vx");
     vel_plot->AddCurve(output_matrix_->Element(4, 0), DataPlot::Green, "vy");
     vel_plot->AddCurve(output_matrix_->Element(5, 0), DataPlot::Blue, "vz");
 
     // Progress plot
-    DataPlot1D *prog_plot = new DataPlot1D(position, "Progress", 0, 1.1f);
+    DataPlot1D *prog_plot = new DataPlot1D(main_box->NewRow(), "Progress", 0, 1.1f);
     prog_plot->AddCurve(output_matrix_->Element(12, 0), DataPlot::Black, "t/T");
 
     // --------------------------------------------------------
