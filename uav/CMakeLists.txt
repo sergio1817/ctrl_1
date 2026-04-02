@@ -1,4 +1,4 @@
-PROJECT(ctrl1_RL)
+PROJECT(ctrl1_RL_t)
 cmake_minimum_required(VERSION 3.5)
 
 ### Eigen
@@ -10,15 +10,21 @@ cmake_minimum_required(VERSION 3.5)
 #link_directories(${Eigen_INCLUDE_DIRS})
 
 # No module
-set(Eigen3_DIR "$ENV{Eigen3_DIR_ARM7a}")
-SET( EIGEN3_INCLUDE_DIR "$ENV{EIGEN3_INCLUDE_DIR_ARM7a}" )
-INCLUDE_DIRECTORIES ( "${EIGEN3_INCLUDE_DIR}" )
-find_package (Eigen3 REQUIRED NO_MODULE)
-link_directories(${Eigen_INCLUDE_DIRS})
+# set(Eigen3_DIR "$ENV{Eigen3_DIR_ARM7a}")
+# SET( EIGEN3_INCLUDE_DIR "$ENV{EIGEN3_INCLUDE_DIR_ARM7a}" )
+# INCLUDE_DIRECTORIES ( "${EIGEN3_INCLUDE_DIR}" )
+# find_package (Eigen3 REQUIRED NO_MODULE)
+# link_directories(${Eigen_INCLUDE_DIRS})
 
-message(Eigen3_DIR="${Eigen3_DIR}")
-message(EIGEN3_INCLUDE_DIR="${EIGEN3_INCLUDE_DIR}")
+# message(Eigen3_DIR="${Eigen3_DIR}")
+# message(EIGEN3_INCLUDE_DIR="${EIGEN3_INCLUDE_DIR}")
 
+set(EIGEN3_INCLUDE_DIR
+    "$ENV{HOME}/lib/eigen-3.4.1"
+    CACHE PATH "Eigen include dir")
+
+include_directories(${EIGEN3_INCLUDE_DIR})
+message(STATUS "Using Eigen from: ${EIGEN3_INCLUDE_DIR}")
 
 
 SET(FLAIR_USE_FILTER TRUE)

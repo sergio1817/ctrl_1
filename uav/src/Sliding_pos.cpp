@@ -507,12 +507,12 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     //std::cout<<"NNap: " << NNap.transpose() << '\n';
 
-    saturate(NNap, Eigen::Vector3f(-0.5,-0.5,-6), Eigen::Vector3f(0.5,0.5,0));
+    saturate(NNap, Eigen::Vector3f(-1,-1,-7), Eigen::Vector3f(1,1,0));
 
     Eigen::Vector3f uc = -Kpv.cwiseProduct(nurp);
     Eigen::Vector3f u = uc + NNap; //- m->Value()*g->Value()*ez + m->Value()*xirpp
 
-    saturate(u, Eigen::Vector3f(-0.5,-0.5,-6), Eigen::Vector3f(0.5,0.5,0));
+    saturate(u, Eigen::Vector3f(-1,-1,-7), Eigen::Vector3f(1,1,0));
 
     //std::cout<<"u: " << u.transpose() << '\n';
 

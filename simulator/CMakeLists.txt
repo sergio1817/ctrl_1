@@ -1,4 +1,4 @@
-PROJECT(ctrl1_RL_simulator)
+PROJECT(ctrl1_RL_t_simulator)
 cmake_minimum_required(VERSION 3.5)
 
 SET(FLAIR_USE_SIMULATOR TRUE)
