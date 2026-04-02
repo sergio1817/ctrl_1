@@ -127,9 +127,8 @@ private:
     float reward = 0.0F;
     float gamma_val = 0.0F;
 
-    /* Kahan-compensated accumulators for reward_int and NNc_int */
-    KahanState<float> reward_kahan;
-    KahanState<float> NNc_kahan;
+    float reward_int = 0.0F;
+    float NNc_int = 0.0F;
 
     double delta_t = 0.0F;
 
