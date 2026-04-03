@@ -1554,10 +1554,22 @@ void TrajectoryManager::BuildOccupancyGrid() {
 }
 
 // ============================================================
-// A* path search with 26-connectivity
+// FindPath — JPS 3D with A* fallback
 // ============================================================
 bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vector3d &goal,
                                   std::vector<Eigen::Vector3d> &path) {
+    // Try JPS first (much faster on large grids)
+    if (FindPathJPS(start, goal, path))
+        return true;
+    // Fallback to regular A* for degenerate cases
+    return FindPathAStar(start, goal, path);
+}
+
+// ============================================================
+// A* path search with 26-connectivity (fallback)
+// ============================================================
+bool TrajectoryManager::FindPathAStar(const Eigen::Vector3d &start, const Eigen::Vector3d &goal,
+                                       std::vector<Eigen::Vector3d> &path) {
     path.clear();
 
     Eigen::Vector3i sg = WorldToGrid(start);
@@ -1733,6 +1745,414 @@ std::vector<Eigen::Vector3d> TrajectoryManager::SimplifyPath(
         i = j;
     }
     return result;
+}
+
+// ============================================================
+// JPS 3D Neighbor Pruning Tables
+// ============================================================
+const int TrajectoryManager::JPS3DNeib::nsz[4][2] = {
+    {26, 0}, {1, 8}, {3, 12}, {7, 12}
+};
+
+TrajectoryManager::JPS3DNeib::JPS3DNeib() {
+    int id = 0;
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
+                for (int dev = 0; dev < nsz[norm1][0]; ++dev)
+                    Neib(dx, dy, dz, norm1, dev,
+                         ns[id][0][dev], ns[id][1][dev], ns[id][2][dev]);
+                for (int dev = 0; dev < nsz[norm1][1]; ++dev)
+                    FNeib(dx, dy, dz, norm1, dev,
+                          f1[id][0][dev], f1[id][1][dev], f1[id][2][dev],
+                          f2[id][0][dev], f2[id][1][dev], f2[id][2][dev]);
+                id++;
+            }
+        }
+    }
+}
+
+void TrajectoryManager::JPS3DNeib::Neib(int dx, int dy, int dz,
+    int norm1, int dev, int& tx, int& ty, int& tz) {
+    switch (norm1) {
+    case 0:
+        switch (dev) {
+            case 0: tx=1; ty=0; tz=0; return;
+            case 1: tx=-1; ty=0; tz=0; return;
+            case 2: tx=0; ty=1; tz=0; return;
+            case 3: tx=1; ty=1; tz=0; return;
+            case 4: tx=-1; ty=1; tz=0; return;
+            case 5: tx=0; ty=-1; tz=0; return;
+            case 6: tx=1; ty=-1; tz=0; return;
+            case 7: tx=-1; ty=-1; tz=0; return;
+            case 8: tx=0; ty=0; tz=1; return;
+            case 9: tx=1; ty=0; tz=1; return;
+            case 10: tx=-1; ty=0; tz=1; return;
+            case 11: tx=0; ty=1; tz=1; return;
+            case 12: tx=1; ty=1; tz=1; return;
+            case 13: tx=-1; ty=1; tz=1; return;
+            case 14: tx=0; ty=-1; tz=1; return;
+            case 15: tx=1; ty=-1; tz=1; return;
+            case 16: tx=-1; ty=-1; tz=1; return;
+            case 17: tx=0; ty=0; tz=-1; return;
+            case 18: tx=1; ty=0; tz=-1; return;
+            case 19: tx=-1; ty=0; tz=-1; return;
+            case 20: tx=0; ty=1; tz=-1; return;
+            case 21: tx=1; ty=1; tz=-1; return;
+            case 22: tx=-1; ty=1; tz=-1; return;
+            case 23: tx=0; ty=-1; tz=-1; return;
+            case 24: tx=1; ty=-1; tz=-1; return;
+            case 25: tx=-1; ty=-1; tz=-1; return;
+        }
+    case 1:
+        tx = dx; ty = dy; tz = dz; return;
+    case 2:
+        switch (dev) {
+            case 0:
+                if (dz == 0) { tx = 0; ty = dy; tz = 0; }
+                else { tx = 0; ty = 0; tz = dz; }
+                return;
+            case 1:
+                if (dx == 0) { tx = 0; ty = dy; tz = 0; }
+                else { tx = dx; ty = 0; tz = 0; }
+                return;
+            case 2:
+                tx = dx; ty = dy; tz = dz; return;
+        }
+    case 3:
+        switch (dev) {
+            case 0: tx = dx; ty = 0; tz = 0; return;
+            case 1: tx = 0; ty = dy; tz = 0; return;
+            case 2: tx = 0; ty = 0; tz = dz; return;
+            case 3: tx = dx; ty = dy; tz = 0; return;
+            case 4: tx = dx; ty = 0; tz = dz; return;
+            case 5: tx = 0; ty = dy; tz = dz; return;
+            case 6: tx = dx; ty = dy; tz = dz; return;
+        }
+    }
+}
+
+void TrajectoryManager::JPS3DNeib::FNeib(int dx, int dy, int dz,
+    int norm1, int dev,
+    int& fx, int& fy, int& fz,
+    int& nx, int& ny, int& nz) {
+    switch (norm1) {
+    case 1:
+        switch (dev) {
+            case 0: fx=0; fy=1; fz=0; break;
+            case 1: fx=0; fy=-1; fz=0; break;
+            case 2: fx=1; fy=0; fz=0; break;
+            case 3: fx=1; fy=1; fz=0; break;
+            case 4: fx=1; fy=-1; fz=0; break;
+            case 5: fx=-1; fy=0; fz=0; break;
+            case 6: fx=-1; fy=1; fz=0; break;
+            case 7: fx=-1; fy=-1; fz=0; break;
+        }
+        nx = fx; ny = fy; nz = dz;
+        if (dx != 0) { fz = fx; fx = 0; nz = fz; nx = dx; }
+        if (dy != 0) { fz = fy; fy = 0; nz = fz; ny = dy; }
+        return;
+    case 2:
+        if (dx == 0) {
+            switch (dev) {
+                case 0: fx=0; fy=0; fz=-dz; nx=0; ny=dy; nz=-dz; return;
+                case 1: fx=0; fy=-dy; fz=0; nx=0; ny=-dy; nz=dz; return;
+                case 2: fx=1; fy=0; fz=0; nx=1; ny=dy; nz=dz; return;
+                case 3: fx=-1; fy=0; fz=0; nx=-1; ny=dy; nz=dz; return;
+                case 4: fx=1; fy=0; fz=-dz; nx=1; ny=dy; nz=-dz; return;
+                case 5: fx=1; fy=-dy; fz=0; nx=1; ny=-dy; nz=dz; return;
+                case 6: fx=-1; fy=0; fz=-dz; nx=-1; ny=dy; nz=-dz; return;
+                case 7: fx=-1; fy=-dy; fz=0; nx=-1; ny=-dy; nz=dz; return;
+                case 8: fx=1; fy=0; fz=0; nx=1; ny=dy; nz=0; return;
+                case 9: fx=1; fy=0; fz=0; nx=1; ny=0; nz=dz; return;
+                case 10: fx=-1; fy=0; fz=0; nx=-1; ny=dy; nz=0; return;
+                case 11: fx=-1; fy=0; fz=0; nx=-1; ny=0; nz=dz; return;
+            }
+        } else if (dy == 0) {
+            switch (dev) {
+                case 0: fx=0; fy=0; fz=-dz; nx=dx; ny=0; nz=-dz; return;
+                case 1: fx=-dx; fy=0; fz=0; nx=-dx; ny=0; nz=dz; return;
+                case 2: fx=0; fy=1; fz=0; nx=dx; ny=1; nz=dz; return;
+                case 3: fx=0; fy=-1; fz=0; nx=dx; ny=-1; nz=dz; return;
+                case 4: fx=0; fy=1; fz=-dz; nx=dx; ny=1; nz=-dz; return;
+                case 5: fx=-dx; fy=1; fz=0; nx=-dx; ny=1; nz=dz; return;
+                case 6: fx=0; fy=-1; fz=-dz; nx=dx; ny=-1; nz=-dz; return;
+                case 7: fx=-dx; fy=-1; fz=0; nx=-dx; ny=-1; nz=dz; return;
+                case 8: fx=0; fy=1; fz=0; nx=dx; ny=1; nz=0; return;
+                case 9: fx=0; fy=1; fz=0; nx=0; ny=1; nz=dz; return;
+                case 10: fx=0; fy=-1; fz=0; nx=dx; ny=-1; nz=0; return;
+                case 11: fx=0; fy=-1; fz=0; nx=0; ny=-1; nz=dz; return;
+            }
+        } else { // dz == 0
+            switch (dev) {
+                case 0: fx=0; fy=-dy; fz=0; nx=dx; ny=-dy; nz=0; return;
+                case 1: fx=-dx; fy=0; fz=0; nx=-dx; ny=dy; nz=0; return;
+                case 2: fx=0; fy=0; fz=1; nx=dx; ny=dy; nz=1; return;
+                case 3: fx=0; fy=0; fz=-1; nx=dx; ny=dy; nz=-1; return;
+                case 4: fx=0; fy=-dy; fz=1; nx=dx; ny=-dy; nz=1; return;
+                case 5: fx=-dx; fy=0; fz=1; nx=-dx; ny=dy; nz=1; return;
+                case 6: fx=0; fy=-dy; fz=-1; nx=dx; ny=-dy; nz=-1; return;
+                case 7: fx=-dx; fy=0; fz=-1; nx=-dx; ny=dy; nz=-1; return;
+                case 8: fx=0; fy=0; fz=1; nx=dx; ny=0; nz=1; return;
+                case 9: fx=0; fy=0; fz=1; nx=0; ny=dy; nz=1; return;
+                case 10: fx=0; fy=0; fz=-1; nx=dx; ny=0; nz=-1; return;
+                case 11: fx=0; fy=0; fz=-1; nx=0; ny=dy; nz=-1; return;
+            }
+        }
+    case 3:
+        switch (dev) {
+            case 0: fx=-dx; fy=0; fz=0; nx=-dx; ny=dy; nz=dz; return;
+            case 1: fx=0; fy=-dy; fz=0; nx=dx; ny=-dy; nz=dz; return;
+            case 2: fx=0; fy=0; fz=-dz; nx=dx; ny=dy; nz=-dz; return;
+            case 3: fx=0; fy=-dy; fz=-dz; nx=dx; ny=-dy; nz=-dz; return;
+            case 4: fx=-dx; fy=0; fz=-dz; nx=-dx; ny=dy; nz=-dz; return;
+            case 5: fx=-dx; fy=-dy; fz=0; nx=-dx; ny=-dy; nz=dz; return;
+            case 6: fx=-dx; fy=0; fz=0; nx=-dx; ny=0; nz=dz; return;
+            case 7: fx=-dx; fy=0; fz=0; nx=-dx; ny=dy; nz=0; return;
+            case 8: fx=0; fy=-dy; fz=0; nx=0; ny=-dy; nz=dz; return;
+            case 9: fx=0; fy=-dy; fz=0; nx=dx; ny=-dy; nz=0; return;
+            case 10: fx=0; fy=0; fz=-dz; nx=0; ny=dy; nz=-dz; return;
+            case 11: fx=0; fy=0; fz=-dz; nx=dx; ny=0; nz=-dz; return;
+        }
+    }
+}
+
+// ============================================================
+// JPS 3D: HasForced / Jump / FindPathJPS
+// ============================================================
+bool TrajectoryManager::HasForcedJPS(int x, int y, int z,
+                                      int dx, int dy, int dz) {
+    int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
+    int id = (dx + 1) + 3 * (dy + 1) + 9 * (dz + 1);
+    int num_check;
+    switch (norm1) {
+        case 1: num_check = 8; break;
+        case 2: num_check = 8; break;
+        case 3: num_check = 6; break;
+        default: return false;
+    }
+    for (int fn = 0; fn < num_check; ++fn) {
+        int nx = x + jps_neib_.f1[id][0][fn];
+        int ny = y + jps_neib_.f1[id][1][fn];
+        int nz = z + jps_neib_.f1[id][2][fn];
+        if (IsOccupied(nx, ny, nz))
+            return true;
+    }
+    return false;
+}
+
+bool TrajectoryManager::JumpJPS(int x, int y, int z,
+                                 int dx, int dy, int dz,
+                                 int& jx, int& jy, int& jz) {
+    // Iterative jump to avoid stack overflow on large grids
+    int cx = x, cy = y, cz = z;
+    // Max steps = largest grid dimension to prevent infinite loops
+    int max_steps = grid_nx_ + grid_ny_ + grid_nz_;
+    for (int step = 0; step < max_steps; ++step) {
+        int nx = cx + dx;
+        int ny = cy + dy;
+        int nz = cz + dz;
+
+        if (!GridInBounds(nx, ny, nz) || IsOccupied(nx, ny, nz))
+            return false;
+
+        if (nx == jps_goal_x_ && ny == jps_goal_y_ && nz == jps_goal_z_) {
+            jx = nx; jy = ny; jz = nz;
+            return true;
+        }
+
+        if (HasForcedJPS(nx, ny, nz, dx, dy, dz)) {
+            jx = nx; jy = ny; jz = nz;
+            return true;
+        }
+
+        // For diagonal moves, recursively jump in sub-directions
+        int id = (dx + 1) + 3 * (dy + 1) + 9 * (dz + 1);
+        int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
+        int num_neib = jps_neib_.nsz[norm1][0];
+        // Check sub-directions (all natural neighbors except the last one,
+        // which is the primary direction itself)
+        for (int k = 0; k < num_neib - 1; ++k) {
+            int sdx = jps_neib_.ns[id][0][k];
+            int sdy = jps_neib_.ns[id][1][k];
+            int sdz = jps_neib_.ns[id][2][k];
+            int sub_jx, sub_jy, sub_jz;
+            if (JumpJPS(nx, ny, nz, sdx, sdy, sdz, sub_jx, sub_jy, sub_jz)) {
+                jx = nx; jy = ny; jz = nz;
+                return true;
+            }
+        }
+
+        // Continue in primary direction (tail-call optimization via loop)
+        cx = nx; cy = ny; cz = nz;
+    }
+    return false;
+}
+
+bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
+                                     const Eigen::Vector3d &goal,
+                                     std::vector<Eigen::Vector3d> &path) {
+    path.clear();
+
+    Eigen::Vector3i sg = WorldToGrid(start);
+    Eigen::Vector3i gg = WorldToGrid(goal);
+    int sx = sg.x(), sy = sg.y(), sz = sg.z();
+    int gx = gg.x(), gy = gg.y(), gz = gg.z();
+
+    if (!GridInBounds(sx, sy, sz) || !GridInBounds(gx, gy, gz)) return false;
+    if (IsOccupied(sx, sy, sz) || IsOccupied(gx, gy, gz)) return false;
+
+    if (sx == gx && sy == gy && sz == gz) {
+        path.push_back(start);
+        path.push_back(goal);
+        return true;
+    }
+
+    // Store goal for JumpJPS
+    jps_goal_x_ = gx;
+    jps_goal_y_ = gy;
+    jps_goal_z_ = gz;
+
+    size_t N = static_cast<size_t>(grid_nx_) * grid_ny_ * grid_nz_;
+    std::fill(astar_gcost_.begin(), astar_gcost_.begin() + N, std::numeric_limits<float>::max());
+    std::fill(astar_parent_.begin(), astar_parent_.begin() + N, -2);
+
+    // Also need direction arrays for JPS successor generation
+    // Store dx/dy/dz per cell so getSucc knows the arrival direction
+    std::vector<int8_t> cell_dx(N, 0), cell_dy(N, 0), cell_dz(N, 0);
+
+    struct PQEntry {
+        float f;
+        int cell;
+        bool operator>(const PQEntry &o) const { return f > o.f; }
+    };
+    std::priority_queue<PQEntry, std::vector<PQEntry>, std::greater<PQEntry> > open_q;
+
+    int nyz = grid_ny_ * grid_nz_;
+    #define JPS_CELL_IDX(ix_, iy_, iz_) ((ix_) * nyz + (iy_) * grid_nz_ + (iz_))
+
+    auto eucDist = [](int x1, int y1, int z1, int x2, int y2, int z2) -> float {
+        float ddx = static_cast<float>(x2 - x1);
+        float ddy = static_cast<float>(y2 - y1);
+        float ddz = static_cast<float>(z2 - z1);
+        return std::sqrt(ddx*ddx + ddy*ddy + ddz*ddz);
+    };
+
+    float res_f = static_cast<float>(grid_res_);
+    int start_cell = JPS_CELL_IDX(sx, sy, sz);
+    int goal_cell = JPS_CELL_IDX(gx, gy, gz);
+    astar_gcost_[start_cell] = 0.0f;
+    astar_parent_[start_cell] = -1;
+    // Start node: dx=dy=dz=0 means expand all 26 neighbors
+    cell_dx[start_cell] = 0; cell_dy[start_cell] = 0; cell_dz[start_cell] = 0;
+
+    PQEntry se;
+    se.f = eucDist(sx, sy, sz, gx, gy, gz) * res_f;
+    se.cell = start_cell;
+    open_q.push(se);
+
+    bool found = false;
+    int max_iter = static_cast<int>(std::min(N, static_cast<size_t>(800000)));
+    int iter = 0;
+
+    while (!open_q.empty() && iter < max_iter) {
+        ++iter;
+        PQEntry top = open_q.top();
+        open_q.pop();
+
+        int ci = top.cell;
+        int cx = ci / nyz;
+        int cy = (ci % nyz) / grid_nz_;
+        int cz = ci % grid_nz_;
+        float cur_g = astar_gcost_[ci];
+
+        // Stale entry check
+        if (top.f > cur_g + eucDist(cx, cy, cz, gx, gy, gz) * res_f + 0.01f)
+            continue;
+
+        if (ci == goal_cell) {
+            found = true;
+            break;
+        }
+
+        // Get JPS successors using pruning tables
+        int cur_dx = cell_dx[ci];
+        int cur_dy = cell_dy[ci];
+        int cur_dz = cell_dz[ci];
+        int norm1 = std::abs(cur_dx) + std::abs(cur_dy) + std::abs(cur_dz);
+        int dir_id = (cur_dx + 1) + 3 * (cur_dy + 1) + 9 * (cur_dz + 1);
+        int num_neib = jps_neib_.nsz[norm1][0];
+        int num_fneib = jps_neib_.nsz[norm1][1];
+
+        for (int dev = 0; dev < num_neib + num_fneib; ++dev) {
+            int ddx, ddy, ddz;
+            if (dev < num_neib) {
+                // Natural neighbor
+                ddx = jps_neib_.ns[dir_id][0][dev];
+                ddy = jps_neib_.ns[dir_id][1][dev];
+                ddz = jps_neib_.ns[dir_id][2][dev];
+            } else {
+                // Forced neighbor: check if the obstacle cell is occupied
+                int fidx = dev - num_neib;
+                int fnx = cx + jps_neib_.f1[dir_id][0][fidx];
+                int fny = cy + jps_neib_.f1[dir_id][1][fidx];
+                int fnz = cz + jps_neib_.f1[dir_id][2][fidx];
+                if (!IsOccupied(fnx, fny, fnz))
+                    continue;  // no forced neighbor here
+                ddx = jps_neib_.f2[dir_id][0][fidx];
+                ddy = jps_neib_.f2[dir_id][1][fidx];
+                ddz = jps_neib_.f2[dir_id][2][fidx];
+            }
+
+            int new_x, new_y, new_z;
+            if (!JumpJPS(cx, cy, cz, ddx, ddy, ddz, new_x, new_y, new_z))
+                continue;
+
+            int nb = JPS_CELL_IDX(new_x, new_y, new_z);
+            float move_cost = eucDist(cx, cy, cz, new_x, new_y, new_z) * res_f;
+            float new_g = cur_g + move_cost;
+
+            if (new_g < astar_gcost_[nb]) {
+                astar_gcost_[nb] = new_g;
+                astar_parent_[nb] = ci;
+                // Normalize direction to unit steps
+                int ndx = (new_x > cx) ? 1 : ((new_x < cx) ? -1 : 0);
+                int ndy = (new_y > cy) ? 1 : ((new_y < cy) ? -1 : 0);
+                int ndz = (new_z > cz) ? 1 : ((new_z < cz) ? -1 : 0);
+                cell_dx[nb] = static_cast<int8_t>(ndx);
+                cell_dy[nb] = static_cast<int8_t>(ndy);
+                cell_dz[nb] = static_cast<int8_t>(ndz);
+                float h = eucDist(new_x, new_y, new_z, gx, gy, gz) * res_f;
+                PQEntry e;
+                e.f = new_g + h;
+                e.cell = nb;
+                open_q.push(e);
+            }
+        }
+    }
+
+    #undef JPS_CELL_IDX
+
+    if (!found) return false;
+
+    // Reconstruct path
+    std::vector<Eigen::Vector3d> raw_path;
+    int ci = goal_cell;
+    while (ci >= 0) {
+        int ix = ci / nyz;
+        int iy = (ci % nyz) / grid_nz_;
+        int iz = ci % grid_nz_;
+        raw_path.push_back(GridToWorld(ix, iy, iz));
+        ci = astar_parent_[ci];
+    }
+    std::reverse(raw_path.begin(), raw_path.end());
+
+    if (!raw_path.empty()) raw_path.front() = start;
+    if (raw_path.size() > 1) raw_path.back() = goal;
+
+    path = SimplifyPath(raw_path);
+    return true;
 }
 
 // ============================================================

@@ -260,6 +260,39 @@ private:
     std::vector<float> astar_gcost_;
     std::vector<int>   astar_parent_;
 
+    // -------------------------------------------------------
+    // JPS 3D neighbor pruning tables
+    // -------------------------------------------------------
+    struct JPS3DNeib {
+        // ns[id][axis][dev] — natural successor directions per (dx,dy,dz)
+        int ns[27][3][26];
+        // f1[id][axis][dev] — forced neighbor obstacle-check positions
+        int f1[27][3][12];
+        // f2[id][axis][dev] — forced neighbor add directions
+        int f2[27][3][12];
+        // nsz[norm1][0] = num natural, nsz[norm1][1] = num forced
+        static const int nsz[4][2];
+
+        JPS3DNeib();
+    private:
+        void Neib(int dx, int dy, int dz, int norm1, int dev,
+                  int& tx, int& ty, int& tz);
+        void FNeib(int dx, int dy, int dz, int norm1, int dev,
+                   int& fx, int& fy, int& fz,
+                   int& nx, int& ny, int& nz);
+    };
+    JPS3DNeib jps_neib_;  // constructed once in InitGrid
+
+    int jps_goal_x_, jps_goal_y_, jps_goal_z_;  // goal grid coords for JumpJPS
+
+    bool JumpJPS(int x, int y, int z, int dx, int dy, int dz,
+                 int& jx, int& jy, int& jz);
+    bool HasForcedJPS(int x, int y, int z, int dx, int dy, int dz);
+    bool FindPathJPS(const Eigen::Vector3d &start, const Eigen::Vector3d &goal,
+                     std::vector<Eigen::Vector3d> &path);
+    bool FindPathAStar(const Eigen::Vector3d &start, const Eigen::Vector3d &goal,
+                       std::vector<Eigen::Vector3d> &path);
+
     void InitGrid(double res);
     void ClearGrid();
     void MarkSphereOccupied(const Eigen::Vector3d &center, double radius);
