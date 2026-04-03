@@ -1984,7 +1984,7 @@ bool TrajectoryManager::JumpJPS(int x, int y, int z,
 
         // For diagonal moves, recursively jump in sub-directions
         int id = (dx + 1) + 3 * (dy + 1) + 9 * (dz + 1);
-        int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
+        // norm1 already computed above
         int num_neib = jps_neib_.nsz[norm1][0];
         // Check sub-directions (all natural neighbors except the last one,
         // which is the primary direction itself)
