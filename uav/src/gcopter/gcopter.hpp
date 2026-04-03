@@ -28,6 +28,7 @@
 #include "minco.hpp"
 #include "flatness.hpp"
 #include "lbfgs.hpp"
+#include "geo_utils.hpp"
 
 #include <Eigen/Dense>
 

@@ -973,8 +973,8 @@ bool TrajectoryManager::SolveAmTraj() {
     Eigen::Vector3d finAcc = Eigen::Vector3d::Zero();
 
     // Create AM-Traj optimizer: wT, wAcc=1.0, wJerk=1.0, maxVel, maxAcc, maxIter, eps
-    AmTraj amtraj(wT, 1.0, 1.0, v_max, a_max, max_iter, 0.02);
-    Trajectory traj = amtraj.genOptimalTrajDTC(wayPs, iniVel, iniAcc, finVel, finAcc);
+    amtraj::AmTraj amtraj_opt(wT, 1.0, 1.0, v_max, a_max, max_iter, 0.02);
+    amtraj::Trajectory traj = amtraj_opt.genOptimalTrajDTC(wayPs, iniVel, iniAcc, finVel, finAcc);
 
     int N = traj.getPieceNum();
     if (N < 1 || N > MAX_SEGMENTS) {
@@ -993,13 +993,13 @@ bool TrajectoryManager::SolveAmTraj() {
         // Store AM-Traj degree-5 coefficients into our 3x8 storage
         // AM-Traj: natural coefficients c5,c4,c3,c2,c1,c0 for p(t)=c5*t^5+...+c0
         // Our format: coeffs(axis, k) where p(t) = sum(coeffs(axis,k) * t^k)
-        CoefficientMat cm = traj[i].getCoeffMat(false); // natural coefficients
+        amtraj::CoefficientMat cm = traj[i].getCoeffMat(false); // natural coefficients
         segments_[i].coeffs.setZero();
         for (int axis = 0; axis < 3; ++axis) {
             // AM-Traj col 0 = highest power (t^5), col 5 = constant (t^0)
             // Our col k = coefficient of t^k
-            for (int c = 0; c <= TrajOrder; ++c) {
-                segments_[i].coeffs(axis, c) = cm(axis, TrajOrder - c);
+            for (int c = 0; c <= amtraj::TrajOrder; ++c) {
+                segments_[i].coeffs(axis, c) = cm(axis, amtraj::TrajOrder - c);
             }
             // Cols 6,7 remain zero (degree-5 polynomial, not degree-7)
         }

@@ -10,6 +10,8 @@
 #include <Eigen/Dense>
 
 // Polynomial order and trajectory dimension are fixed here
+namespace amtraj {
+
 constexpr int TrajOrder = 5;
 constexpr int TrajDim = 3;
 
@@ -1523,5 +1525,7 @@ public:
         return traj;
     }
 };
+
+} // namespace amtraj
 
 #endif
