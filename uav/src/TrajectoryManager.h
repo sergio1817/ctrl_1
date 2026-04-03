@@ -50,9 +50,9 @@ namespace flair {
  * \brief Trajectory planner IODevice following Flair patterns
  *
  * Inherits from IODevice like TrajectoryGenerator2DCircle.
- * Provides min-snap / AM-Traj trajectory generation with obstacle avoidance.
- * Outputs a 15-row Matrix: des_x/y/z, des_vx/vy/vz, des_ax/ay/az,
- * des_jx/jy/jz, progress, des_yaw, des_yaw_rate.
+ * Provides min-snap / GCOPTER trajectory generation with obstacle avoidance.
+ * Outputs a 13-row Matrix: des_x/y/z, des_vx/vy/vz, des_ax/ay/az,
+ * des_jx/jy/jz, progress.
  */
 class TrajectoryManager : public flair::core::IODevice {
 public:
@@ -71,8 +71,6 @@ public:
     void GetSpeed(flair::core::Vector3Df &vel) const;
     void GetAcceleration(flair::core::Vector3Df &acc) const;
     void GetJerk(flair::core::Vector3Df &jerk) const;
-    float GetDesiredYaw() const;
-    float GetDesiredYawRate() const;
     flair::core::Matrix *GetMatrix() const;
 
     // -------------------------------------------------------
@@ -99,9 +97,6 @@ public:
     void UpdateObstaclePosition(int idx, const flair::core::Vector3Df &pos);
     void UpdateObstacleVelocity(int idx, const flair::core::Vector3Df &vel);
 
-    // Phase 6: Camera-based obstacle feed
-    void AddCameraObstacle(const flair::core::Vector3Df &pos, float radius);
-
 private:
     void UpdateFrom(const flair::core::io_data *data) {}
 
@@ -117,7 +112,7 @@ private:
 
     State state_;
 
-    // Output matrix (15x1): pos(3), vel(3), acc(3), jerk(3), progress(1), yaw(1), yaw_rate(1)
+    // Output matrix (13x1): pos(3), vel(3), acc(3), jerk(3), progress(1)
     flair::core::Matrix *output_matrix_;
 
     // Cached trajectory state
@@ -125,8 +120,6 @@ private:
     flair::core::Vector3Df last_vel_;
     flair::core::Vector3Df last_acc_;
     flair::core::Vector3Df last_jerk_;
-    float last_yaw_;
-    float last_yaw_rate_;
     float progress_;
 
     // Trajectory storage (polynomial coefficients per segment)
@@ -147,16 +140,10 @@ private:
     double total_duration_;
     bool trajectory_valid_;
 
-    // Phase 1: AM-Traj backend flag
-    bool use_amtraj_;  // true when AM-Traj backend is selected
-
     // GCOPTER/MINCO backend
     bool use_gcopter_;  // true when GCOPTER/MINCO backend is selected
     Trajectory<5> gcopter_traj_;  // stored GCOPTER trajectory (degree 5)
     bool gcopter_traj_valid_;     // true when gcopter_traj_ has valid data
-
-    // Phase 2: Yaw trajectory (degree-3 polynomial per segment)
-    double yaw_coeffs_[MAX_SEGMENTS][4];  // a0 + a1*t + a2*t^2 + a3*t^3
 
     // Timing
     double execution_start_time_;
@@ -198,21 +185,8 @@ private:
     flair::gui::PushButton *stop_button_;
     flair::gui::Label *status_label_;
 
-    // Phase 1: AM-Traj GUI widgets
+    // Planner backend selection
     flair::gui::ComboBox *planner_backend_;
-    flair::gui::DoubleSpinBox *amtraj_wt_;
-    flair::gui::SpinBox *amtraj_max_iter_;
-
-    // Phase 2: Yaw GUI widgets
-    flair::gui::ComboBox *yaw_mode_;
-    flair::gui::DoubleSpinBox *fixed_yaw_;
-
-    // Phase 4: TOPP-RA GUI widgets
-    flair::gui::ComboBox *postproc_mode_;
-
-    // Phase 5: Spatio-temporal corridor GUI widgets
-    flair::gui::DoubleSpinBox *prediction_horizon_;
-    flair::gui::DoubleSpinBox *uncertainty_growth_;
 
     // Internal helpers — original
     void ReadWaypointsFromGUI();
@@ -223,23 +197,12 @@ private:
     Eigen::Vector3d EvalAcc(double t) const;
     Eigen::Vector3d EvalJer(double t) const;
 
-    // Phase 1: AM-Traj backend
-    bool SolveAmTraj();
-
     // GCOPTER/MINCO backend
     bool SolveGCOPTER();
     std::vector<Eigen::Vector3d> GetNearbyObstaclePoints(
         const Eigen::Vector3d &seg_start,
         const Eigen::Vector3d &seg_end,
         double radius) const;
-
-    // Phase 2: Yaw trajectory helpers
-    void ComputeYawTrajectory();
-    double EvalYaw(double t) const;
-    double EvalYawRate(double t) const;
-
-    // Phase 4: TOPP-RA post-processing
-    void ReparametrizeTopp();
 
     // -------------------------------------------------------
     // Obstacle avoidance pipeline

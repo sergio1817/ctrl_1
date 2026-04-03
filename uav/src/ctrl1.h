@@ -19,7 +19,6 @@
 #include "Sliding.h"
 #include "Sliding_pos.h"
 #include "TrajectoryManager.h"
-#include "CameraObstacleDetector.h"
 //#include "Sliding_force.h"
 
 
@@ -86,7 +85,6 @@ class ctrl1 : public flair::meta::UavStateMachine {
         //flair::filter::Sliding_force *u_sliding_force;
 
         TrajectoryManager *traj_manager_;
-        CameraObstacleDetector *camera_detector_;
 
         flair::meta::MetaVrpnObject *uavVrpn;
         flair::meta::MetaVrpnObject *targetVrpn;
@@ -108,9 +106,6 @@ class ctrl1 : public flair::meta::UavStateMachine {
         flair::gui::ComboBox *force_behavior, *fx_behavior, *fy_behavior, *fz_behavior;
         flair::gui::DoubleSpinBox *fxd, *fyd, *fzd, *afx, *wfx, *bfx, *afy, *wfy, *bfy, *afz, *wfz, *bfz;
         flair::gui::Label *lfx, *lfy, *lfz;
-
-        // Phase 3: VRPN latency compensation
-        flair::gui::DoubleSpinBox *vrpn_latency_spin_;
 
         flair::core::AhrsData *customReferenceOrientation,*customOrientation;
         

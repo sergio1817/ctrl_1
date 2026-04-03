@@ -15,7 +15,6 @@
 #include "Sliding.h"
 #include "Sliding_pos.h"
 #include "TrajectoryManager.h"
-#include "CameraObstacleDetector.h"
 //#include "TargetJR3.h"
 //#include "Sliding_force.h"
 //#include "MetaJR3.h"
@@ -129,13 +128,6 @@ ctrl1::ctrl1(TargetController *controller)
     // Register target rigid body as obstacle 0
     // Initial position far away (z=-99), radius will be set by GUI before planning
     traj_manager_->AddObstacle(Vector3Df(0, 0, -99), 0.15f);
-
-    // Phase 3: VRPN latency compensation GUI
-    GroupBox *vrpn_box = new GroupBox(positionTab->NewRow(), "VRPN Compensation");
-    vrpn_latency_spin_ = new DoubleSpinBox(vrpn_box->NewRow(), "VRPN latency", " ms", 0.0, 50.0, 1.0, 1);
-
-    // Phase 6: Camera obstacle detector
-    camera_detector_ = new CameraObstacleDetector(trajbox->NewRow(), "Camera Obstacles");
 
     position_behavior = new ComboBox(posbox->NewRow(),"Select behavior");
     position_behavior->AddItem("Regulation");
@@ -348,10 +340,6 @@ ctrl1::~ctrl1() {
     if (traj_manager_ != nullptr) {
         delete traj_manager_;
         traj_manager_ = nullptr;
-    }
-    if (camera_detector_ != nullptr) {
-        delete camera_detector_;
-        camera_detector_ = nullptr;
     }
     //if (u_sliding_force != nullptr) { 
     //    delete u_sliding_force; 
@@ -902,14 +890,6 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     uavVrpn->GetSpeed(uav_vel);
     uavVrpn->GetQuaternion(uav_quat);
 
-    // Phase 3: VRPN latency compensation (Smith predictor)
-    {
-        float latency = static_cast<float>(vrpn_latency_spin_->Value()) / 1000.0f;
-        uav_pos.x += uav_vel.x * latency;
-        uav_pos.y += uav_vel.y * latency;
-        uav_pos.z += uav_vel.z * latency;
-    }
-
     const AhrsData *currentOrientation = GetDefaultOrientation();
     Quaternion currentQuaternion;
     Vector3Df currentAngularRates;
@@ -929,22 +909,6 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
         Vector3Df target_vel;
         targetVrpn->GetSpeed(target_vel);
         traj_manager_->UpdateObstacleVelocity(0, target_vel);
-    }
-
-    // Phase 6: Camera-based obstacle detection
-    if (camera_detector_ != nullptr) {
-        camera_detector_->Update();
-        if (camera_detector_->IsObstacleDetected()) {
-            Vector3Df cam_obs_pos;
-            camera_detector_->GetObstaclePosition(cam_obs_pos);
-            // Transform from body frame to world frame using UAV position
-            Vector3Df world_obs_pos;
-            world_obs_pos.x = uav_pos.x + cam_obs_pos.x;
-            world_obs_pos.y = uav_pos.y + cam_obs_pos.y;
-            world_obs_pos.z = uav_pos.z + cam_obs_pos.z;
-            traj_manager_->AddCameraObstacle(world_obs_pos,
-                                              camera_detector_->GetObstacleRadius());
-        }
     }
 
     // Update trajectory planner before reading references

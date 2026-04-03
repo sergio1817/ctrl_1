@@ -14,9 +14,6 @@
 /*********************************************************************/
 
 #include "TrajectoryManager.h"
-#include "amtraj/am_traj.hpp"
-#include "gcopter.hpp"
-#include "firi.hpp"
 #include <Matrix.h>
 #include <MatrixDescriptor.h>
 #include <IODevice.h>
@@ -36,6 +33,7 @@
 #include <Vector3D.h>
 #include <Eigen/Core>
 #include <Eigen/LU>
+#include <Eigen/SVD>
 #include <cmath>
 #include <algorithm>
 #include <cstring>
@@ -69,13 +67,10 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       last_vel_(0, 0, 0),
       last_acc_(0, 0, 0),
       last_jerk_(0, 0, 0),
-      last_yaw_(0.0f),
-      last_yaw_rate_(0.0f),
       progress_(0.0f),
       num_segments_(0),
       total_duration_(0.0),
       trajectory_valid_(false),
-      use_amtraj_(false),
       use_gcopter_(false),
       gcopter_traj_valid_(false),
       execution_start_time_(0.0),
@@ -88,15 +83,10 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       grid_res_(0.1),
       grid_origin_(WS_X_MIN, WS_Y_MIN, WS_Z_MIN)
 {
-    // Initialize yaw coefficients
-    for (int i = 0; i < MAX_SEGMENTS; ++i) {
-        for (int j = 0; j < 4; ++j) yaw_coeffs_[i][j] = 0.0;
-    }
-
     // --------------------------------------------------------
-    // Output matrix with named elements (15 elements)
+    // Output matrix with named elements (13 elements)
     // --------------------------------------------------------
-    MatrixDescriptor *desc = new MatrixDescriptor(15, 1);
+    MatrixDescriptor *desc = new MatrixDescriptor(13, 1);
     desc->SetElementName(0, 0, "des_x");
     desc->SetElementName(1, 0, "des_y");
     desc->SetElementName(2, 0, "des_z");
@@ -110,8 +100,6 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
     desc->SetElementName(10, 0, "des_jy");
     desc->SetElementName(11, 0, "des_jz");
     desc->SetElementName(12, 0, "progress");
-    desc->SetElementName(13, 0, "des_yaw");
-    desc->SetElementName(14, 0, "des_yaw_rate");
     output_matrix_ = new Matrix(this, desc, floatType, name);
     delete desc;
 
@@ -142,31 +130,10 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
     // (no XML), Flair uses the minimum value of the range as default.
     // The user should set XY range >= 5 and Max altitude >= 3 for typical use.
 
-    // Phase 1: Planner backend selection
+    // Planner backend selection
     planner_backend_ = new ComboBox(settings_box_->NewRow(), "Planner backend");
     planner_backend_->AddItem("Min-Snap (basic)");
-    planner_backend_->AddItem("AM-Traj (optimal)");
     planner_backend_->AddItem("GCOPTER/MINCO");
-    amtraj_wt_ = new DoubleSpinBox(settings_box_->LastRowLastCol(), "Time weight (wT)", "", 0.01, 10.0, 0.1, 2);
-    amtraj_max_iter_ = new SpinBox(settings_box_->LastRowLastCol(), "AM-Traj max iter", 1, 100, 1);
-
-    // Phase 2: Yaw settings
-    GroupBox *yaw_box = new GroupBox(main_box->NewRow(), "Yaw Trajectory");
-    yaw_mode_ = new ComboBox(yaw_box->NewRow(), "Yaw mode");
-    yaw_mode_->AddItem("Fixed");
-    yaw_mode_->AddItem("Follow velocity");
-    fixed_yaw_ = new DoubleSpinBox(yaw_box->LastRowLastCol(), "Fixed yaw", " deg", 0.0, 360.0, 1.0, 1);
-
-    // Phase 4: Post-processing selection
-    GroupBox *postproc_box = new GroupBox(main_box->NewRow(), "Post-processing");
-    postproc_mode_ = new ComboBox(postproc_box->NewRow(), "Post-processing");
-    postproc_mode_->AddItem("None");
-    postproc_mode_->AddItem("TOPP-RA reachability");
-
-    // Phase 5: Spatio-temporal corridor settings
-    GroupBox *pred_box = new GroupBox(main_box->NewRow(), "Dynamic Prediction");
-    prediction_horizon_ = new DoubleSpinBox(pred_box->NewRow(), "Prediction horizon", " s", 0.0, 10.0, 0.5, 1);
-    uncertainty_growth_ = new DoubleSpinBox(pred_box->LastRowLastCol(), "Uncertainty growth", " m/s", 0.0, 0.5, 0.05, 2);
 
     // Waypoint count
     num_wp_spin_ = new SpinBox(settings_box_->NewRow(), "Num waypoints", 2, MAX_GUI_WAYPOINTS, 1);
@@ -224,11 +191,6 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
 
     DataPlot1D *pos_z_plot = new DataPlot1D(plot_tab->LastRowLastCol(), "Desired Z", -3, 0);
     pos_z_plot->AddCurve(output_matrix_->Element(2, 0), DataPlot::Blue, "des_z");
-
-    // Phase 2: Yaw plot
-    DataPlot1D *yaw_plot = new DataPlot1D(plot_tab->NewRow(), "Desired Yaw", -4, 4);
-    yaw_plot->AddCurve(output_matrix_->Element(13, 0), DataPlot::Red, "yaw");
-    yaw_plot->AddCurve(output_matrix_->Element(14, 0), DataPlot::Green, "yaw_rate");
 
     // --------------------------------------------------------
     // Initialize waypoints to defaults
@@ -302,8 +264,6 @@ void TrajectoryManager::Update(Time time) {
             a = EvalAcc(elapsed);
             j = EvalJer(elapsed);
         }
-        double yaw = EvalYaw(elapsed);
-        double yaw_rate = EvalYawRate(elapsed);
 
         // Thread-safe matrix update (Flair pattern)
         output_matrix_->GetMutex();
@@ -320,8 +280,6 @@ void TrajectoryManager::Update(Time time) {
         output_matrix_->SetValueNoMutex(10, 0, static_cast<float>(j.y()));
         output_matrix_->SetValueNoMutex(11, 0, static_cast<float>(j.z()));
         output_matrix_->SetValueNoMutex(12, 0, prog);
-        output_matrix_->SetValueNoMutex(13, 0, static_cast<float>(yaw));
-        output_matrix_->SetValueNoMutex(14, 0, static_cast<float>(yaw_rate));
         output_matrix_->ReleaseMutex();
 
         // Store for GetPosition/GetSpeed/etc accessors
@@ -337,8 +295,6 @@ void TrajectoryManager::Update(Time time) {
         last_jerk_ = Vector3Df(static_cast<float>(j.x()),
                                static_cast<float>(j.y()),
                                static_cast<float>(j.z()));
-        last_yaw_ = static_cast<float>(yaw);
-        last_yaw_rate_ = static_cast<float>(yaw_rate);
         progress_ = prog;
 
         // Signal data update to DataPlot framework
@@ -378,8 +334,6 @@ void TrajectoryManager::Update(Time time) {
             output_matrix_->SetValueNoMutex(i, 0, 0.0f); // vel, acc, jerk = 0
         }
         output_matrix_->SetValueNoMutex(12, 0, 1.0f); // progress = 100%
-        output_matrix_->SetValueNoMutex(13, 0, last_yaw_);
-        output_matrix_->SetValueNoMutex(14, 0, 0.0f);
         output_matrix_->ReleaseMutex();
 
         output_matrix_->SetDataTime(time);
@@ -387,7 +341,7 @@ void TrajectoryManager::Update(Time time) {
     } else {
         // Not executing - zero output
         output_matrix_->GetMutex();
-        for (int i = 0; i < 15; ++i) {
+        for (int i = 0; i < 13; ++i) {
             output_matrix_->SetValueNoMutex(i, 0, 0.0f);
         }
         output_matrix_->ReleaseMutex();
@@ -396,8 +350,6 @@ void TrajectoryManager::Update(Time time) {
         last_vel_ = Vector3Df(0, 0, 0);
         last_acc_ = Vector3Df(0, 0, 0);
         last_jerk_ = Vector3Df(0, 0, 0);
-        last_yaw_ = 0.0f;
-        last_yaw_rate_ = 0.0f;
         progress_ = 0.0f;
 
         output_matrix_->SetDataTime(time);
@@ -430,14 +382,6 @@ Matrix *TrajectoryManager::GetMatrix() const {
 
 float TrajectoryManager::GetProgress() const {
     return progress_;
-}
-
-float TrajectoryManager::GetDesiredYaw() const {
-    return last_yaw_;
-}
-
-float TrajectoryManager::GetDesiredYawRate() const {
-    return last_yaw_rate_;
 }
 
 bool TrajectoryManager::IsRunning() const {
@@ -526,8 +470,7 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
 
     // Select planner backend
     int backend_idx = planner_backend_->CurrentIndex();
-    use_amtraj_ = (backend_idx == 1);
-    use_gcopter_ = (backend_idx == 2);
+    use_gcopter_ = (backend_idx == 1);
     gcopter_traj_valid_ = false;
 
     // Use full obstacle avoidance pipeline if enabled and obstacles present
@@ -541,20 +484,8 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
             use_gcopter_ = false;
             ok = SolveMinSnap();
         }
-    } else if (use_amtraj_) {
-        ok = SolveAmTraj();
     } else {
         ok = SolveMinSnap();
-    }
-
-    // Phase 4: TOPP-RA post-processing (only for basic min-snap, AM-Traj handles constraints)
-    if (ok && !use_amtraj_ && !use_gcopter_ && postproc_mode_->CurrentIndex() == 1) {
-        ReparametrizeTopp();
-    }
-
-    // Phase 2: Compute yaw trajectory
-    if (ok) {
-        ComputeYawTrajectory();
     }
 
     if (ok) {
@@ -596,17 +527,8 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
             Warn("GCOPTER replan failed, falling back to min-snap\n");
             ok = SolveMinSnap();
         }
-    } else if (use_amtraj_) {
-        ok = SolveAmTraj();
     } else {
         ok = SolveMinSnap();
-    }
-
-    if (ok && !use_amtraj_ && !use_gcopter_ && postproc_mode_->CurrentIndex() == 1) {
-        ReparametrizeTopp();
-    }
-    if (ok) {
-        ComputeYawTrajectory();
     }
 
     if (ok) {
@@ -645,11 +567,6 @@ void TrajectoryManager::UpdateObstacleVelocity(int idx, const Vector3Df &vel) {
     if (idx >= 0 && idx < num_obstacles_) {
         obstacles_[idx].vel = Eigen::Vector3d(vel.x, vel.y, vel.z);
     }
-}
-
-void TrajectoryManager::AddCameraObstacle(const Vector3Df &pos, float radius) {
-    // Camera obstacles are appended like regular obstacles
-    AddObstacle(pos, radius);
 }
 
 // ============================================================
@@ -945,72 +862,6 @@ Eigen::Vector3d TrajectoryManager::EvalJer(double t) const {
 
 
 // ################################################################
-// Phase 1: AM-Traj backend solver
-// ################################################################
-bool TrajectoryManager::SolveAmTraj() {
-    num_segments_ = num_waypoints_ - 1;
-    if (num_segments_ < 1 || num_segments_ > MAX_SEGMENTS) {
-        return false;
-    }
-
-    double v_max = max_vel_->Value();
-    if (v_max < 0.1) v_max = 0.1;
-    double a_max = max_acc_->Value();
-    if (a_max < 0.1) a_max = 0.1;
-    double wT = amtraj_wt_->Value();
-    int max_iter = amtraj_max_iter_->Value();
-
-    // Build waypoint vector for AM-Traj
-    std::vector<Eigen::Vector3d> wayPs;
-    wayPs.reserve(num_waypoints_);
-    for (int i = 0; i < num_waypoints_; ++i) {
-        wayPs.push_back(waypoints_[i]);
-    }
-
-    Eigen::Vector3d iniVel = start_vel_;
-    Eigen::Vector3d finVel = end_vel_;
-    Eigen::Vector3d iniAcc = Eigen::Vector3d::Zero();
-    Eigen::Vector3d finAcc = Eigen::Vector3d::Zero();
-
-    // Create AM-Traj optimizer: wT, wAcc=1.0, wJerk=1.0, maxVel, maxAcc, maxIter, eps
-    amtraj::AmTraj amtraj_opt(wT, 1.0, 1.0, v_max, a_max, max_iter, 0.02);
-    amtraj::Trajectory traj = amtraj_opt.genOptimalTrajDTC(wayPs, iniVel, iniAcc, finVel, finAcc);
-
-    int N = traj.getPieceNum();
-    if (N < 1 || N > MAX_SEGMENTS) {
-        Warn("AM-Traj returned %d pieces (max %d)\n", N, MAX_SEGMENTS);
-        return false;
-    }
-
-    num_segments_ = N;
-    total_duration_ = 0.0;
-
-    for (int i = 0; i < N; ++i) {
-        double dur = traj[i].getDuration();
-        segments_[i].duration = dur;
-        total_duration_ += dur;
-
-        // Store AM-Traj degree-5 coefficients into our 3x8 storage
-        // AM-Traj: natural coefficients c5,c4,c3,c2,c1,c0 for p(t)=c5*t^5+...+c0
-        // Our format: coeffs(axis, k) where p(t) = sum(coeffs(axis,k) * t^k)
-        amtraj::CoefficientMat cm = traj[i].getCoeffMat(false); // natural coefficients
-        segments_[i].coeffs.setZero();
-        for (int axis = 0; axis < 3; ++axis) {
-            // AM-Traj col 0 = highest power (t^5), col 5 = constant (t^0)
-            // Our col k = coefficient of t^k
-            for (int c = 0; c <= amtraj::TrajOrder; ++c) {
-                segments_[i].coeffs(axis, c) = cm(axis, amtraj::TrajOrder - c);
-            }
-            // Cols 6,7 remain zero (degree-5 polynomial, not degree-7)
-        }
-    }
-
-    trajectory_valid_ = true;
-    Info("AM-Traj: %d segments, %.2f s total\n", N, total_duration_);
-    return true;
-}
-
-// ################################################################
 // GCOPTER/MINCO backend: helper to extract obstacle points near a segment
 // ################################################################
 std::vector<Eigen::Vector3d> TrajectoryManager::GetNearbyObstaclePoints(
@@ -1051,8 +902,35 @@ std::vector<Eigen::Vector3d> TrajectoryManager::GetNearbyObstaclePoints(
 }
 
 // ################################################################
-// GCOPTER/MINCO backend solver
+// GCOPTER/MINCO backend solver (robust version)
 // ################################################################
+
+// Helper: check if a set of 3D points has at least 4 non-coplanar points
+static bool HasNonCoplanarPoints(const Eigen::Matrix3Xd &pts, int min_pts = 4) {
+    int n = static_cast<int>(pts.cols());
+    if (n < min_pts) return false;
+    // Check coplanarity: compute rank of (pts - centroid)
+    Eigen::Vector3d centroid = pts.rowwise().mean();
+    Eigen::Matrix3Xd centered = pts.colwise() - centroid;
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(centered, Eigen::ComputeThinU);
+    int rank = 0;
+    for (int i = 0; i < svd.singularValues().size(); ++i) {
+        if (svd.singularValues()(i) > 1e-6) rank++;
+    }
+    return rank >= 3;  // need full 3D span for valid polytope
+}
+
+// Helper: check if a point satisfies all halfplanes of a polytope
+// hPoly rows: [a1 a2 a3 b] where a1*x + a2*y + a3*z + b <= 0
+static bool IsInsidePolytope(const Eigen::MatrixX4d &hPoly, const Eigen::Vector3d &pt) {
+    for (int r = 0; r < hPoly.rows(); ++r) {
+        double val = hPoly(r, 0) * pt.x() + hPoly(r, 1) * pt.y()
+                   + hPoly(r, 2) * pt.z() + hPoly(r, 3);
+        if (val > 1e-6) return false;
+    }
+    return true;
+}
+
 bool TrajectoryManager::SolveGCOPTER() {
     num_segments_ = num_waypoints_ - 1;
     if (num_segments_ < 1 || num_segments_ > MAX_SEGMENTS) {
@@ -1085,6 +963,7 @@ bool TrajectoryManager::SolveGCOPTER() {
     typedef std::vector<Eigen::MatrixX4d> PolyhedraH;
     PolyhedraH hPolytopes;
     double search_radius = 2.0;  // meters around each segment to search for obstacles
+    bool any_degenerate = false;
 
     for (int i = 0; i < num_segments_; ++i) {
         Eigen::Vector3d seg_a = waypoints_[i];
@@ -1099,12 +978,35 @@ bool TrajectoryManager::SolveGCOPTER() {
         }
 
         Eigen::MatrixX4d hPoly;
-        bool firi_ok = firi::firi(bdBox, obs_pc, seg_a, seg_b, hPoly);
+        bool firi_ok = false;
+
+        // (a) Check if obs_pc has at least 4 non-coplanar points before calling FIRI
+        if (obs_pc.cols() == 0 || HasNonCoplanarPoints(obs_pc)) {
+            firi_ok = firi::firi(bdBox, obs_pc, seg_a, seg_b, hPoly);
+        }
+
         if (!firi_ok) {
             Warn("FIRI failed for segment %d, using bounding box\n", i);
             hPoly = bdBox;
         }
+
+        // (b) Validate the polytope: at least 4 faces and segment endpoints inside
+        if (hPoly.rows() < 4 ||
+            !IsInsidePolytope(hPoly, seg_a) ||
+            !IsInsidePolytope(hPoly, seg_b)) {
+            Warn("segment %d polytope degenerate (rows=%d), using bounding box\n",
+                 i, static_cast<int>(hPoly.rows()));
+            hPoly = bdBox;
+            any_degenerate = true;
+        }
+
         hPolytopes.push_back(hPoly);
+    }
+
+    // (c) If any polytopes were degenerate, fall back to min-snap
+    if (any_degenerate) {
+        Warn("GCOPTER: degenerate polytopes detected, falling back to min-snap\n");
+        return false;
     }
 
     // Step 2: Set up GCOPTER optimizer
@@ -1139,8 +1041,8 @@ bool TrajectoryManager::SolveGCOPTER() {
                                      lengthPerPiece, smoothEps, integralRes,
                                      magBd, penWt, physPm);
     if (!setup_ok) {
-        Warn("GCOPTER setup failed, falling back to min-snap\n");
-        return SolveMinSnap();
+        Warn("GCOPTER setup failed\n");
+        return false;
     }
 
     // Step 3: Optimize
@@ -1148,10 +1050,26 @@ bool TrajectoryManager::SolveGCOPTER() {
     double cost = optimizer.optimize(traj, 1e-4);
     (void)cost;
 
+    // (d)(e) Validate optimization result
     int N = traj.getPieceNum();
     if (N < 1) {
-        Warn("GCOPTER optimization returned %d pieces, falling back to min-snap\n", N);
-        return SolveMinSnap();
+        Warn("GCOPTER optimization returned %d pieces\n", N);
+        return false;
+    }
+
+    // Check all durations are positive
+    for (int i = 0; i < N; ++i) {
+        if (traj[i].getDuration() <= 0.0) {
+            Warn("GCOPTER: piece %d has non-positive duration %.4f\n",
+                 i, traj[i].getDuration());
+            return false;
+        }
+    }
+
+    double total_dur = traj.getTotalDuration();
+    if (total_dur <= 0.0 || std::isnan(total_dur) || std::isinf(total_dur)) {
+        Warn("GCOPTER: invalid total duration %.4f\n", total_dur);
+        return false;
     }
 
     // Step 4: Store the result
@@ -1159,11 +1077,10 @@ bool TrajectoryManager::SolveGCOPTER() {
     gcopter_traj_valid_ = true;
 
     // Compute total duration and store segment info for compatibility
-    total_duration_ = traj.getTotalDuration();
+    total_duration_ = total_dur;
     num_segments_ = std::min(N, MAX_SEGMENTS);
     for (int i = 0; i < num_segments_; ++i) {
         segments_[i].duration = traj[i].getDuration();
-        // Store degree-5 coefficients into our 3x8 storage for yaw computation
         segments_[i].coeffs.setZero();
         Eigen::Matrix<double, 3, 6> cm = traj[i].getCoeffMat();
         for (int axis = 0; axis < 3; ++axis) {
@@ -1177,154 +1094,6 @@ bool TrajectoryManager::SolveGCOPTER() {
     trajectory_valid_ = true;
     Info("GCOPTER/MINCO: %d pieces, %.2f s total, cost=%.4f\n", N, total_duration_, cost);
     return true;
-}
-
-// ################################################################
-// Phase 2: Yaw trajectory computation
-// ################################################################
-void TrajectoryManager::ComputeYawTrajectory() {
-    if (!trajectory_valid_ || num_segments_ < 1) return;
-
-    int yaw_mode = yaw_mode_->CurrentIndex();
-
-    for (int i = 0; i < num_segments_; ++i) {
-        double T = segments_[i].duration;
-        if (T < 1e-9) T = 1e-9;
-
-        double psi_start, psi_end;
-
-        if (yaw_mode == 0) {
-            // Fixed yaw mode
-            double fixed_deg = fixed_yaw_->Value();
-            double fixed_rad = fixed_deg * M_PI / 180.0;
-            psi_start = fixed_rad;
-            psi_end = fixed_rad;
-        } else {
-            // Follow velocity mode: yaw = atan2(vy, vx) at segment boundaries
-            double t_start = 0.0;
-            for (int j = 0; j < i; ++j) t_start += segments_[j].duration;
-            double t_end = t_start + T;
-
-            Eigen::Vector3d v_start = EvalVel(t_start);
-            Eigen::Vector3d v_end = EvalVel(t_end);
-
-            double speed_start = std::sqrt(v_start.x()*v_start.x() + v_start.y()*v_start.y());
-            double speed_end = std::sqrt(v_end.x()*v_end.x() + v_end.y()*v_end.y());
-
-            if (speed_start > 0.01) {
-                psi_start = std::atan2(v_start.y(), v_start.x());
-            } else {
-                psi_start = (i > 0) ? (yaw_coeffs_[i-1][0] + yaw_coeffs_[i-1][1]*segments_[i-1].duration
-                            + yaw_coeffs_[i-1][2]*segments_[i-1].duration*segments_[i-1].duration
-                            + yaw_coeffs_[i-1][3]*segments_[i-1].duration*segments_[i-1].duration*segments_[i-1].duration) : 0.0;
-            }
-
-            if (speed_end > 0.01) {
-                psi_end = std::atan2(v_end.y(), v_end.x());
-            } else {
-                psi_end = psi_start;
-            }
-
-            // Unwrap angle difference
-            double diff = psi_end - psi_start;
-            while (diff > M_PI) diff -= 2.0 * M_PI;
-            while (diff < -M_PI) diff += 2.0 * M_PI;
-            psi_end = psi_start + diff;
-        }
-
-        // Solve minimum-acceleration yaw polynomial (degree 3)
-        // Boundary: psi(0)=psi_start, psi(T)=psi_end, psi'(0)=0, psi'(T)=0
-        // psi(t) = a0 + a1*t + a2*t^2 + a3*t^3
-        double T2 = T * T;
-        double T3 = T2 * T;
-        yaw_coeffs_[i][0] = psi_start;                         // a0
-        yaw_coeffs_[i][1] = 0.0;                               // a1 (zero initial yaw rate)
-        yaw_coeffs_[i][2] = 3.0 * (psi_end - psi_start) / T2; // a2
-        yaw_coeffs_[i][3] = -2.0 * (psi_end - psi_start) / T3;// a3
-    }
-}
-
-double TrajectoryManager::EvalYaw(double t) const {
-    if (!trajectory_valid_ || num_segments_ < 1) return 0.0;
-    double t_local;
-    int seg = LocateSegment(t, t_local);
-    const double *c = yaw_coeffs_[seg];
-    return c[0] + c[1]*t_local + c[2]*t_local*t_local + c[3]*t_local*t_local*t_local;
-}
-
-double TrajectoryManager::EvalYawRate(double t) const {
-    if (!trajectory_valid_ || num_segments_ < 1) return 0.0;
-    double t_local;
-    int seg = LocateSegment(t, t_local);
-    const double *c = yaw_coeffs_[seg];
-    return c[1] + 2.0*c[2]*t_local + 3.0*c[3]*t_local*t_local;
-}
-
-// ################################################################
-// Phase 4: TOPP-RA simplified post-processing
-// ################################################################
-void TrajectoryManager::ReparametrizeTopp() {
-    if (!trajectory_valid_ || num_segments_ < 1) return;
-
-    double v_max = max_vel_->Value();
-    double a_max = max_acc_->Value();
-    if (v_max < 0.1 || a_max < 0.1) return;
-
-    // Process each segment independently
-    for (int seg = 0; seg < num_segments_; ++seg) {
-        double T = segments_[seg].duration;
-        if (T < 1e-9) continue;
-
-        // Discretize path parameter s in [0, T] into K points
-        const int K = 100;
-        double ds = T / (K - 1);
-
-        // Forward pass: compute max sdot at each point given a_max
-        double sdot[K];
-        sdot[0] = 1.0;  // normalized speed
-        for (int k = 1; k < K; ++k) {
-            double t_k = k * ds;
-            Eigen::Vector3d vel = EvalVel(t_k > T ? T : t_k);
-            Eigen::Vector3d acc = EvalAcc(t_k > T ? T : t_k);
-            double v_norm = vel.norm();
-            double a_norm = acc.norm();
-
-            // Maximum sdot such that ||v|| * sdot <= v_max and ||a|| * sdot^2 <= a_max
-            double sdot_v = (v_norm > 1e-9) ? (v_max / v_norm) : 1e6;
-            double sdot_a = (a_norm > 1e-9) ? std::sqrt(a_max / a_norm) : 1e6;
-            sdot[k] = std::min(sdot_v, sdot_a);
-        }
-
-        // Backward pass: ensure reachability
-        for (int k = K - 2; k >= 0; --k) {
-            // sdot[k] can't be so large that we can't decelerate to sdot[k+1]
-            double max_from_next = sdot[k + 1] + a_max * ds;
-            if (sdot[k] > max_from_next) {
-                sdot[k] = max_from_next;
-            }
-        }
-
-        // Compute new duration from the time-optimal parametrization
-        double new_T = 0.0;
-        for (int k = 0; k < K - 1; ++k) {
-            double avg_sdot = 0.5 * (sdot[k] + sdot[k + 1]);
-            if (avg_sdot < 1e-9) avg_sdot = 1e-9;
-            new_T += ds / avg_sdot;
-        }
-
-        // Only scale up (slow down) — don't speed up beyond original
-        if (new_T > T) {
-            double scale = new_T / T;
-            segments_[seg].duration = new_T;
-            // Recompute total duration
-            total_duration_ = 0.0;
-            for (int i = 0; i < num_segments_; ++i) {
-                total_duration_ += segments_[i].duration;
-            }
-            Info("TOPP-RA: segment %d scaled %.2f -> %.2f s (factor %.2f)\n",
-                 seg, T, new_T, scale);
-        }
-    }
 }
 
 // ################################################################
@@ -1538,18 +1307,16 @@ void TrajectoryManager::BuildOccupancyGrid() {
         MarkCylinderOccupied(obstacles_[i].pos.x(), obstacles_[i].pos.y(),
                              obstacles_[i].radius + sm);
 
-        // Phase 5: Spatio-temporal corridors — predict obstacle future positions
-        double pred_horizon = prediction_horizon_->Value();
-        double unc_growth = uncertainty_growth_->Value();
+        // Spatio-temporal prediction: predict obstacle future positions
+        // using safety_margin as the uncertainty factor
         double obs_speed = obstacles_[i].vel.norm();
-
-        if (pred_horizon > 0.0 && obs_speed > 0.01) {
-            // Sample predicted positions at 5 time steps over the prediction horizon
+        if (obs_speed > 0.01 && total_duration_ > 0.0) {
+            double pred_horizon = total_duration_;
             for (int step = 1; step <= 4; ++step) {
                 double t_pred = pred_horizon * step / 4.0;
                 double pred_x = obstacles_[i].pos.x() + obstacles_[i].vel.x() * t_pred;
                 double pred_y = obstacles_[i].pos.y() + obstacles_[i].vel.y() * t_pred;
-                double inflated_radius = obstacles_[i].radius + sm + unc_growth * t_pred;
+                double inflated_radius = obstacles_[i].radius + sm + sm * t_pred;
                 MarkCylinderOccupied(pred_x, pred_y, inflated_radius);
             }
         }
