@@ -24,6 +24,7 @@ set(EIGEN3_INCLUDE_DIR
     CACHE PATH "Eigen include dir")
 
 include_directories(${EIGEN3_INCLUDE_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/gcopter)
 message(STATUS "Using Eigen from: ${EIGEN3_INCLUDE_DIR}")
 
 

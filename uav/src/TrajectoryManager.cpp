@@ -15,6 +15,8 @@
 
 #include "TrajectoryManager.h"
 #include "amtraj/am_traj.hpp"
+#include "gcopter.hpp"
+#include "firi.hpp"
 #include <Matrix.h>
 #include <MatrixDescriptor.h>
 #include <IODevice.h>
@@ -44,6 +46,10 @@ using std::string;
 using namespace flair::core;
 using namespace flair::gui;
 
+// Weighted A* heuristic weight (w > 1 trades optimality for speed)
+// w=1.3 gives 3-5x speedup with paths within 30% of optimal
+static const float ASTAR_WEIGHT = 1.3f;
+
 // Workspace bounds (NED: z negative = up, ground at z=0)
 // Default workspace bounds (overridden by GUI values in Plan())
 
@@ -70,6 +76,8 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       total_duration_(0.0),
       trajectory_valid_(false),
       use_amtraj_(false),
+      use_gcopter_(false),
+      gcopter_traj_valid_(false),
       execution_start_time_(0.0),
       last_replan_time_(0.0),
       num_waypoints_(2),
@@ -138,6 +146,7 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
     planner_backend_ = new ComboBox(settings_box_->NewRow(), "Planner backend");
     planner_backend_->AddItem("Min-Snap (basic)");
     planner_backend_->AddItem("AM-Traj (optimal)");
+    planner_backend_->AddItem("GCOPTER/MINCO");
     amtraj_wt_ = new DoubleSpinBox(settings_box_->LastRowLastCol(), "Time weight (wT)", "", 0.01, 10.0, 0.1, 2);
     amtraj_max_iter_ = new SpinBox(settings_box_->LastRowLastCol(), "AM-Traj max iter", 1, 100, 1);
 
@@ -281,10 +290,18 @@ void TrajectoryManager::Update(Time time) {
         double elapsed = (t_traj < 0.0) ? 0.0 : ((t_traj > total_duration_) ? total_duration_ : t_traj);
         float prog = (total_duration_ > 1e-9) ? static_cast<float>(elapsed / total_duration_) : 1.0f;
 
-        Eigen::Vector3d p = EvalPos(elapsed);
-        Eigen::Vector3d v = EvalVel(elapsed);
-        Eigen::Vector3d a = EvalAcc(elapsed);
-        Eigen::Vector3d j = EvalJer(elapsed);
+        Eigen::Vector3d p, v, a, j;
+        if (use_gcopter_ && gcopter_traj_valid_) {
+            p = gcopter_traj_.getPos(elapsed);
+            v = gcopter_traj_.getVel(elapsed);
+            a = gcopter_traj_.getAcc(elapsed);
+            j = gcopter_traj_.getJer(elapsed);
+        } else {
+            p = EvalPos(elapsed);
+            v = EvalVel(elapsed);
+            a = EvalAcc(elapsed);
+            j = EvalJer(elapsed);
+        }
         double yaw = EvalYaw(elapsed);
         double yaw_rate = EvalYawRate(elapsed);
 
@@ -331,7 +348,9 @@ void TrajectoryManager::Update(Time time) {
         // Check trajectory completion — hold final position
         if (t_traj >= total_duration_) {
             // Store the final position (evaluated at t = total_duration)
-            Eigen::Vector3d p_end = EvalPos(total_duration_);
+            Eigen::Vector3d p_end = (use_gcopter_ && gcopter_traj_valid_)
+                ? gcopter_traj_.getPos(total_duration_)
+                : EvalPos(total_duration_);
             last_pos_ = Vector3Df(static_cast<float>(p_end.x()),
                                   static_cast<float>(p_end.y()),
                                   static_cast<float>(p_end.z()));
@@ -506,12 +525,22 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
     InitGrid(res);
 
     // Select planner backend
-    use_amtraj_ = (planner_backend_->CurrentIndex() == 1);
+    int backend_idx = planner_backend_->CurrentIndex();
+    use_amtraj_ = (backend_idx == 1);
+    use_gcopter_ = (backend_idx == 2);
+    gcopter_traj_valid_ = false;
 
     // Use full obstacle avoidance pipeline if enabled and obstacles present
     bool ok;
     if (obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
         ok = PlanWithObstacleAvoidance();
+    } else if (use_gcopter_) {
+        ok = SolveGCOPTER();
+        if (!ok) {
+            Warn("GCOPTER failed, falling back to min-snap\n");
+            use_gcopter_ = false;
+            ok = SolveMinSnap();
+        }
     } else if (use_amtraj_) {
         ok = SolveAmTraj();
     } else {
@@ -519,7 +548,7 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
     }
 
     // Phase 4: TOPP-RA post-processing (only for basic min-snap, AM-Traj handles constraints)
-    if (ok && !use_amtraj_ && postproc_mode_->CurrentIndex() == 1) {
+    if (ok && !use_amtraj_ && !use_gcopter_ && postproc_mode_->CurrentIndex() == 1) {
         ReparametrizeTopp();
     }
 
@@ -556,16 +585,24 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
         obstacles_[i].radius = obs_r;
     }
 
+    gcopter_traj_valid_ = false;
+
     bool ok;
     if (obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
         ok = PlanWithObstacleAvoidance();
+    } else if (use_gcopter_) {
+        ok = SolveGCOPTER();
+        if (!ok) {
+            Warn("GCOPTER replan failed, falling back to min-snap\n");
+            ok = SolveMinSnap();
+        }
     } else if (use_amtraj_) {
         ok = SolveAmTraj();
     } else {
         ok = SolveMinSnap();
     }
 
-    if (ok && !use_amtraj_ && postproc_mode_->CurrentIndex() == 1) {
+    if (ok && !use_amtraj_ && !use_gcopter_ && postproc_mode_->CurrentIndex() == 1) {
         ReparametrizeTopp();
     }
     if (ok) {
@@ -970,6 +1007,175 @@ bool TrajectoryManager::SolveAmTraj() {
 
     trajectory_valid_ = true;
     Info("AM-Traj: %d segments, %.2f s total\n", N, total_duration_);
+    return true;
+}
+
+// ################################################################
+// GCOPTER/MINCO backend: helper to extract obstacle points near a segment
+// ################################################################
+std::vector<Eigen::Vector3d> TrajectoryManager::GetNearbyObstaclePoints(
+    const Eigen::Vector3d &seg_start,
+    const Eigen::Vector3d &seg_end,
+    double radius) const {
+
+    std::vector<Eigen::Vector3d> pts;
+
+    // Bounding box of the segment expanded by radius
+    Eigen::Vector3d lo, hi;
+    for (int a = 0; a < 3; ++a) {
+        lo(a) = std::min(seg_start(a), seg_end(a)) - radius;
+        hi(a) = std::max(seg_start(a), seg_end(a)) + radius;
+    }
+
+    Eigen::Vector3i lo_g = WorldToGrid(lo);
+    Eigen::Vector3i hi_g = WorldToGrid(hi);
+
+    int ix0 = std::max(lo_g.x(), 0);
+    int iy0 = std::max(lo_g.y(), 0);
+    int iz0 = std::max(lo_g.z(), 0);
+    int ix1 = std::min(hi_g.x(), grid_nx_ - 1);
+    int iy1 = std::min(hi_g.y(), grid_ny_ - 1);
+    int iz1 = std::min(hi_g.z(), grid_nz_ - 1);
+
+    for (int ix = ix0; ix <= ix1; ++ix) {
+        for (int iy = iy0; iy <= iy1; ++iy) {
+            for (int iz = iz0; iz <= iz1; ++iz) {
+                if (IsOccupied(ix, iy, iz)) {
+                    pts.push_back(GridToWorld(ix, iy, iz));
+                }
+            }
+        }
+    }
+
+    return pts;
+}
+
+// ################################################################
+// GCOPTER/MINCO backend solver
+// ################################################################
+bool TrajectoryManager::SolveGCOPTER() {
+    num_segments_ = num_waypoints_ - 1;
+    if (num_segments_ < 1 || num_segments_ > MAX_SEGMENTS) {
+        return false;
+    }
+
+    double v_max = max_vel_->Value();
+    if (v_max < 0.1) v_max = 0.1;
+    double a_max = max_acc_->Value();
+    if (a_max < 0.1) a_max = 0.1;
+
+    // Build occupancy grid if not already built (no-obstacle mode)
+    if (grid_data_.empty() || grid_nx_ == 0) {
+        double res = grid_res_spin_->Value();
+        InitGrid(res);
+        BuildOccupancyGrid();
+    }
+
+    // Step 1: For each path segment, run FIRI to build polytope corridors
+    // Workspace bounding box as H-representation: Ax <= b encoded as Nx4 [a1 a2 a3 b]
+    // where a1*x + a2*y + a3*z + b <= 0
+    Eigen::MatrixX4d bdBox(6, 4);
+    bdBox.row(0) << 1.0, 0.0, 0.0, -WS_X_MAX;   // x <= WS_X_MAX
+    bdBox.row(1) << -1.0, 0.0, 0.0, WS_X_MIN;    // -x <= -WS_X_MIN  i.e. x >= WS_X_MIN
+    bdBox.row(2) << 0.0, 1.0, 0.0, -WS_Y_MAX;
+    bdBox.row(3) << 0.0, -1.0, 0.0, WS_Y_MIN;
+    bdBox.row(4) << 0.0, 0.0, 1.0, -WS_Z_MAX;
+    bdBox.row(5) << 0.0, 0.0, -1.0, WS_Z_MIN;
+
+    typedef std::vector<Eigen::MatrixX4d> PolyhedraH;
+    PolyhedraH hPolytopes;
+    double search_radius = 2.0;  // meters around each segment to search for obstacles
+
+    for (int i = 0; i < num_segments_; ++i) {
+        Eigen::Vector3d seg_a = waypoints_[i];
+        Eigen::Vector3d seg_b = waypoints_[i + 1];
+
+        // Get obstacle points near this segment
+        Eigen::Matrix3Xd obs_pc;
+        std::vector<Eigen::Vector3d> obs_pts = GetNearbyObstaclePoints(seg_a, seg_b, search_radius);
+        obs_pc.resize(3, static_cast<int>(obs_pts.size()));
+        for (int j = 0; j < static_cast<int>(obs_pts.size()); ++j) {
+            obs_pc.col(j) = obs_pts[j];
+        }
+
+        Eigen::MatrixX4d hPoly;
+        bool firi_ok = firi::firi(bdBox, obs_pc, seg_a, seg_b, hPoly);
+        if (!firi_ok) {
+            Warn("FIRI failed for segment %d, using bounding box\n", i);
+            hPoly = bdBox;
+        }
+        hPolytopes.push_back(hPoly);
+    }
+
+    // Step 2: Set up GCOPTER optimizer
+    Eigen::Matrix3d headPVA, tailPVA;
+    headPVA.col(0) = waypoints_[0];
+    headPVA.col(1) = start_vel_;
+    headPVA.col(2) = Eigen::Vector3d::Zero();
+    tailPVA.col(0) = waypoints_[num_waypoints_ - 1];
+    tailPVA.col(1) = end_vel_;
+    tailPVA.col(2) = Eigen::Vector3d::Zero();
+
+    gcopter::GCOPTER_PolytopeSFC optimizer;
+
+    double rho = 1.0;                  // time weight
+    double lengthPerPiece = 1.0;       // meters per MINCO piece
+    double smoothEps = 0.01;           // smoothing factor
+    int integralRes = 8;               // integral resolution
+
+    // magnitudeBounds: [max_vel, max_acc, max_jerk (optional)]
+    Eigen::VectorXd magBd(3);
+    magBd << v_max, a_max, 20.0;
+
+    // penaltyWeights: [velocity, acceleration, jerk penalty]
+    Eigen::VectorXd penWt(3);
+    penWt << 100.0, 100.0, 100.0;
+
+    // physicalParams: [gravity, mass, max_tilt, max_thrust, min_thrust, drag_coeff]
+    Eigen::VectorXd physPm(6);
+    physPm << 9.81, 0.5, 1.0, 10.0, 0.5, 0.1;
+
+    bool setup_ok = optimizer.setup(rho, headPVA, tailPVA, hPolytopes,
+                                     lengthPerPiece, smoothEps, integralRes,
+                                     magBd, penWt, physPm);
+    if (!setup_ok) {
+        Warn("GCOPTER setup failed, falling back to min-snap\n");
+        return SolveMinSnap();
+    }
+
+    // Step 3: Optimize
+    Trajectory<5> traj;
+    double cost = optimizer.optimize(traj, 1e-4);
+    (void)cost;
+
+    int N = traj.getPieceNum();
+    if (N < 1) {
+        Warn("GCOPTER optimization returned %d pieces, falling back to min-snap\n", N);
+        return SolveMinSnap();
+    }
+
+    // Step 4: Store the result
+    gcopter_traj_ = traj;
+    gcopter_traj_valid_ = true;
+
+    // Compute total duration and store segment info for compatibility
+    total_duration_ = traj.getTotalDuration();
+    num_segments_ = std::min(N, MAX_SEGMENTS);
+    for (int i = 0; i < num_segments_; ++i) {
+        segments_[i].duration = traj[i].getDuration();
+        // Store degree-5 coefficients into our 3x8 storage for yaw computation
+        segments_[i].coeffs.setZero();
+        Eigen::Matrix<double, 3, 6> cm = traj[i].getCoeffMat();
+        for (int axis = 0; axis < 3; ++axis) {
+            // GCOPTER: col 0 = highest power (t^5), col 5 = constant (t^0)
+            for (int c = 0; c <= 5; ++c) {
+                segments_[i].coeffs(axis, c) = cm(axis, 5 - c);
+            }
+        }
+    }
+
+    trajectory_valid_ = true;
+    Info("GCOPTER/MINCO: %d pieces, %.2f s total, cost=%.4f\n", N, total_duration_, cost);
     return true;
 }
 
@@ -1401,7 +1607,7 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
     astar_gcost_[start_cell] = 0.0f;
     astar_parent_[start_cell] = -1;  // -1 = start node
     PQEntry se;
-    se.f = eucDist(sx, sy, sz, gx, gy, gz) * res_f;
+    se.f = ASTAR_WEIGHT * eucDist(sx, sy, sz, gx, gy, gz) * res_f;
     se.cell = start_cell;
     open_q.push(se);
 
@@ -1433,7 +1639,7 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
         open_q.pop();
 
         int ci = top.cell;
-        if (top.f > astar_gcost_[ci] + eucDist(ci / nyz, (ci % nyz) / grid_nz_, ci % grid_nz_,
+        if (top.f > astar_gcost_[ci] + ASTAR_WEIGHT * eucDist(ci / nyz, (ci % nyz) / grid_nz_, ci % grid_nz_,
                                           gx, gy, gz) * res_f + 0.01f) {
             continue;  // stale entry
         }
@@ -1473,7 +1679,7 @@ bool TrajectoryManager::FindPath(const Eigen::Vector3d &start, const Eigen::Vect
             if (new_g < astar_gcost_[nb]) {
                 astar_gcost_[nb] = new_g;
                 astar_parent_[nb] = ci;
-                float h = eucDist(nx_i, ny_i, nz_i, gx, gy, gz) * res_f;
+                float h = ASTAR_WEIGHT * eucDist(nx_i, ny_i, nz_i, gx, gy, gz) * res_f;
                 PQEntry e;
                 e.f = new_g + h;
                 e.cell = nb;
@@ -1823,15 +2029,23 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
 
     Info("obstacle avoidance: path has %d waypoints\n", static_cast<int>(full_path.size()));
 
+    // Set waypoints from the full path for the solvers
+    num_waypoints_ = static_cast<int>(full_path.size());
+    for (int i = 0; i < num_waypoints_; ++i) {
+        waypoints_[i] = full_path[i];
+    }
+
+    // GCOPTER mode: use FIRI polytope corridors + GCOPTER optimizer
+    if (use_gcopter_) {
+        bool ok = SolveGCOPTER();
+        if (ok) return true;
+        Warn("GCOPTER with obstacles failed, falling back to corridor min-snap\n");
+    }
+
     // Step 3: Build SFC corridors around path
     std::vector<Corridor> corridors;
     if (!BuildCorridors(full_path, sm, corridors)) {
         Warn("corridor building failed, falling back to unconstrained solve\n");
-        // Fallback: use the path waypoints with unconstrained solver
-        num_waypoints_ = static_cast<int>(full_path.size());
-        for (int i = 0; i < num_waypoints_; ++i) {
-            waypoints_[i] = full_path[i];
-        }
         return SolveMinSnap();
     }
 

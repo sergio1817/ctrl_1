@@ -16,8 +16,14 @@
 #include <IODevice.h>
 #include <Vector3D.h>
 #include <Eigen/Core>
+#include <Eigen/Dense>
 #include <vector>
 #include <string>
+
+// GCOPTER headers
+#include "trajectory.hpp"
+#include "gcopter.hpp"
+#include "firi.hpp"
 
 namespace flair {
     namespace core {
@@ -144,6 +150,11 @@ private:
     // Phase 1: AM-Traj backend flag
     bool use_amtraj_;  // true when AM-Traj backend is selected
 
+    // GCOPTER/MINCO backend
+    bool use_gcopter_;  // true when GCOPTER/MINCO backend is selected
+    Trajectory<5> gcopter_traj_;  // stored GCOPTER trajectory (degree 5)
+    bool gcopter_traj_valid_;     // true when gcopter_traj_ has valid data
+
     // Phase 2: Yaw trajectory (degree-3 polynomial per segment)
     double yaw_coeffs_[MAX_SEGMENTS][4];  // a0 + a1*t + a2*t^2 + a3*t^3
 
@@ -214,6 +225,13 @@ private:
 
     // Phase 1: AM-Traj backend
     bool SolveAmTraj();
+
+    // GCOPTER/MINCO backend
+    bool SolveGCOPTER();
+    std::vector<Eigen::Vector3d> GetNearbyObstaclePoints(
+        const Eigen::Vector3d &seg_start,
+        const Eigen::Vector3d &seg_end,
+        double radius) const;
 
     // Phase 2: Yaw trajectory helpers
     void ComputeYawTrajectory();
