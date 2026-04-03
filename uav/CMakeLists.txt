@@ -59,6 +59,7 @@ SET(SRC_FILES
 	#src/TargetEthJR3.cpp
 	src/AC1.cpp
 	src/TrajectoryManager.cpp
+	src/CameraObstacleDetector.cpp
 )
 
 FLAIR_DEMO(${PROJECT_NAME} "${SRC_FILES}"
