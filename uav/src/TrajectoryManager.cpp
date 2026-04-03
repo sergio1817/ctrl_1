@@ -1347,6 +1347,9 @@ void TrajectoryManager::InitGrid(double res) {
     grid_data_.assign(total, 0u);
     astar_gcost_.resize(total);
     astar_parent_.resize(total);
+    jps_dir_x_.resize(total, 0);
+    jps_dir_y_.resize(total, 0);
+    jps_dir_z_.resize(total, 0);
 }
 
 void TrajectoryManager::ClearGrid() {
@@ -1947,7 +1950,6 @@ bool TrajectoryManager::JumpJPS(int x, int y, int z,
                                  int& jx, int& jy, int& jz) {
     // Iterative jump to avoid stack overflow on large grids
     int cx = x, cy = y, cz = z;
-    // Max steps = largest grid dimension to prevent infinite loops
     int max_steps = grid_nx_ + grid_ny_ + grid_nz_;
     for (int step = 0; step < max_steps; ++step) {
         int nx = cx + dx;
@@ -1956,6 +1958,19 @@ bool TrajectoryManager::JumpJPS(int x, int y, int z,
 
         if (!GridInBounds(nx, ny, nz) || IsOccupied(nx, ny, nz))
             return false;
+
+        // Diagonal safety: prevent corner-cutting
+        // For diagonal moves (norm1 >= 2), check that intermediate
+        // axis-aligned cells are free. Without this, JPS can jump
+        // through obstacle corners that the UAV can't fit through.
+        int norm1 = std::abs(dx) + std::abs(dy) + std::abs(dz);
+        if (norm1 >= 2) {
+            bool blocked = false;
+            if (dx != 0 && IsOccupied(cx + dx, cy, cz)) blocked = true;
+            if (dy != 0 && IsOccupied(cx, cy + dy, cz)) blocked = true;
+            if (dz != 0 && IsOccupied(cx, cy, cz + dz)) blocked = true;
+            if (blocked) return false;
+        }
 
         if (nx == jps_goal_x_ && ny == jps_goal_y_ && nz == jps_goal_z_) {
             jx = nx; jy = ny; jz = nz;
@@ -2018,9 +2033,10 @@ bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
     std::fill(astar_gcost_.begin(), astar_gcost_.begin() + N, std::numeric_limits<float>::max());
     std::fill(astar_parent_.begin(), astar_parent_.begin() + N, -2);
 
-    // Also need direction arrays for JPS successor generation
-    // Store dx/dy/dz per cell so getSucc knows the arrival direction
-    std::vector<int8_t> cell_dx(N, 0), cell_dy(N, 0), cell_dz(N, 0);
+    // Reset pre-allocated JPS direction arrays
+    std::fill(jps_dir_x_.begin(), jps_dir_x_.begin() + N, static_cast<int8_t>(0));
+    std::fill(jps_dir_y_.begin(), jps_dir_y_.begin() + N, static_cast<int8_t>(0));
+    std::fill(jps_dir_z_.begin(), jps_dir_z_.begin() + N, static_cast<int8_t>(0));
 
     struct PQEntry {
         float f;
@@ -2045,7 +2061,7 @@ bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
     astar_gcost_[start_cell] = 0.0f;
     astar_parent_[start_cell] = -1;
     // Start node: dx=dy=dz=0 means expand all 26 neighbors
-    cell_dx[start_cell] = 0; cell_dy[start_cell] = 0; cell_dz[start_cell] = 0;
+    jps_dir_x_[start_cell] = 0; jps_dir_y_[start_cell] = 0; jps_dir_z_[start_cell] = 0;
 
     PQEntry se;
     se.f = eucDist(sx, sy, sz, gx, gy, gz) * res_f;
@@ -2077,9 +2093,9 @@ bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
         }
 
         // Get JPS successors using pruning tables
-        int cur_dx = cell_dx[ci];
-        int cur_dy = cell_dy[ci];
-        int cur_dz = cell_dz[ci];
+        int cur_dx = jps_dir_x_[ci];
+        int cur_dy = jps_dir_y_[ci];
+        int cur_dz = jps_dir_z_[ci];
         int norm1 = std::abs(cur_dx) + std::abs(cur_dy) + std::abs(cur_dz);
         int dir_id = (cur_dx + 1) + 3 * (cur_dy + 1) + 9 * (cur_dz + 1);
         int num_neib = jps_neib_.nsz[norm1][0];
@@ -2120,9 +2136,9 @@ bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
                 int ndx = (new_x > cx) ? 1 : ((new_x < cx) ? -1 : 0);
                 int ndy = (new_y > cy) ? 1 : ((new_y < cy) ? -1 : 0);
                 int ndz = (new_z > cz) ? 1 : ((new_z < cz) ? -1 : 0);
-                cell_dx[nb] = static_cast<int8_t>(ndx);
-                cell_dy[nb] = static_cast<int8_t>(ndy);
-                cell_dz[nb] = static_cast<int8_t>(ndz);
+                jps_dir_x_[nb] = static_cast<int8_t>(ndx);
+                jps_dir_y_[nb] = static_cast<int8_t>(ndy);
+                jps_dir_z_[nb] = static_cast<int8_t>(ndz);
                 float h = eucDist(new_x, new_y, new_z, gx, gy, gz) * res_f;
                 PQEntry e;
                 e.f = new_g + h;

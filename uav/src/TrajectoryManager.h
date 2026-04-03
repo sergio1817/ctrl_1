@@ -259,6 +259,9 @@ private:
 
     std::vector<float> astar_gcost_;
     std::vector<int>   astar_parent_;
+    std::vector<int8_t> jps_dir_x_;   ///< JPS arrival direction per cell
+    std::vector<int8_t> jps_dir_y_;
+    std::vector<int8_t> jps_dir_z_;
 
     // -------------------------------------------------------
     // JPS 3D neighbor pruning tables
