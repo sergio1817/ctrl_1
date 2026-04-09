@@ -154,6 +154,7 @@ private:
 
     // Timing
     double execution_start_time_;
+    bool   execution_time_set_;   ///< true once execution_start_time_ set from a real tick
     double last_replan_time_;
 
     // Waypoints

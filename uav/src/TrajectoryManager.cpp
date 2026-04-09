@@ -77,6 +77,7 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       current_uav_pos_(Eigen::Vector3d::Zero()),
       current_uav_vel_(Eigen::Vector3d::Zero()),
       execution_start_time_(0.0),
+      execution_time_set_(false),
       last_replan_time_(0.0),
       num_waypoints_(2),
       start_vel_(Eigen::Vector3d::Zero()),
@@ -245,7 +246,7 @@ void TrajectoryManager::Update(Time time,
     }
     if (execute_button_->Clicked() && state_ == State::PLANNED) {
         StartTraj();
-        execution_start_time_ = static_cast<double>(time) / 1e9;
+        execution_time_set_ = false;  // will be set on first real tick below
     }
     if (stop_button_->Clicked()) {
         StopTraj();
@@ -255,6 +256,13 @@ void TrajectoryManager::Update(Time time,
     double t_sec = static_cast<double>(time) / 1e9;
 
     if (state_ == State::EXECUTING && trajectory_valid_) {
+        // Set execution start time on the first real tick after Execute is clicked.
+        // This avoids the instant-completion bug when Update() is not called
+        // continuously (e.g. UAV not in flight state).
+        if (!execution_time_set_) {
+            execution_start_time_ = t_sec;
+            execution_time_set_ = true;
+        }
         double t_traj = t_sec - execution_start_time_;
         double elapsed = (t_traj < 0.0) ? 0.0 : ((t_traj > total_duration_) ? total_duration_ : t_traj);
         float prog = (total_duration_ > 1e-9) ? static_cast<float>(elapsed / total_duration_) : 1.0f;
@@ -409,6 +417,7 @@ void TrajectoryManager::StartTraj() {
 
 void TrajectoryManager::StopTraj() {
     state_ = State::IDLE;
+    execution_time_set_ = false;
     status_label_->SetText("IDLE (stopped)");
     Info("trajectory stopped\n");
 }
