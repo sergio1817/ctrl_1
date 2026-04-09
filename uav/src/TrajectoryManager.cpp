@@ -1099,7 +1099,7 @@ bool TrajectoryManager::SolveGCOPTER() {
     }
 
     trajectory_valid_ = true;
-    Info("GCOPTER/MINCO: %d pieces, %.2f s total, cost=%.4f\n", N, total_duration_, cost);
+    Info("MINCO: %d pieces, %.2f s total\n", N, total_duration_);
     return true;
 }
 
