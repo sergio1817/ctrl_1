@@ -1044,70 +1044,123 @@ bool TrajectoryManager::SolveGCOPTER() {
         return false;
     }
 
-    // Step 2: Use MINCO_S3NU for direct banded-LU solve (no L-BFGS, no physical params).
-    // GCOPTER_PolytopeSFC requires full quadrotor aerodynamics — not suitable for our
-    // approximate parameters. MINCO_S3NU gives the same trajectory representation
-    // (degree-5 MINCO polynomial) with a direct O(N) banded solve.
-    int M = num_segments_;
+    // Step 2: MINCO_S3NU with direction-reversal splitting.
+    //
+    // MINCO freely optimises intermediate junction velocities to minimise
+    // integrated snap. At direction-reversal waypoints (e.g. an A* U-turn
+    // around an obstacle) the optimal junction velocity is near-zero, so the
+    // drone visibly "stops" mid-flight.
+    //
+    // Fix: detect reversals (consecutive segment angle > 120°), split the
+    // MINCO problem at those points, and set a non-zero through-velocity
+    // in the departure direction.  Each sub-problem is then solved
+    // independently with velocity-aware time scaling and the resulting
+    // Piece objects are concatenated into a single Trajectory<5>.
 
-    Eigen::Matrix3d headPVA, tailPVA;
-    headPVA.col(0) = waypoints_[0];
-    headPVA.col(1) = start_vel_;
-    headPVA.col(2) = Eigen::Vector3d::Zero();
-    tailPVA.col(0) = waypoints_[num_waypoints_ - 1];
-    tailPVA.col(1) = end_vel_;
-    tailPVA.col(2) = Eigen::Vector3d::Zero();
-
-    // Time allocation: distance / v_max with 1.5x scaling
-    Eigen::VectorXd ts(M);
-    double total_dur = 0.0;
-    for (int i = 0; i < M; ++i) {
-        double dist = (waypoints_[i+1] - waypoints_[i]).norm();
-        double t_seg = dist / v_max * 1.5;
-        if (t_seg < 0.5) t_seg = 0.5;
-        ts(i) = t_seg;
-        total_dur += t_seg;
+    // 2a — find reversal waypoints
+    std::vector<int> split_pts;
+    for (int k = 1; k < num_waypoints_ - 1; ++k) {
+        double d_in  = (waypoints_[k]   - waypoints_[k-1]).norm();
+        double d_out = (waypoints_[k+1] - waypoints_[k]).norm();
+        if (d_in < 1e-6 || d_out < 1e-6) continue;
+        double cos_a = ((waypoints_[k]   - waypoints_[k-1]) / d_in).dot(
+                        (waypoints_[k+1] - waypoints_[k]) / d_out);
+        if (cos_a < -0.5) {   // angle > 120°
+            split_pts.push_back(k);
+            Info("MINCO: reversal at WP%d (cos=%.2f), splitting segment\n", k, cos_a);
+        }
     }
+    split_pts.push_back(num_waypoints_ - 1);   // always terminate at goal
 
-    // Interior waypoints (M-1 intermediate points between start and end)
-    Eigen::Matrix3Xd inPs(3, M - 1);
-    for (int i = 0; i < M - 1; ++i) {
-        inPs.col(i) = waypoints_[i + 1];  // waypoints_[0]=start, waypoints_[M]=end
-    }
-
-    // Velocity-aware iterative time allocation.
-    // Solve MINCO, sample max velocity across all segments; if it exceeds v_max
-    // scale every segment duration up proportionally and re-solve (up to 5 iters).
-    // This eliminates the ±4 m/s polynomial peaks that MINCO_S3NU does not
-    // internally constrain.
+    // 2b — solve one MINCO sub-problem per segment; concatenate pieces
     Trajectory<5> traj;
-    for (int iter = 0; iter < 5; ++iter) {
-        minco::MINCO_S3NU iter_solver;
-        iter_solver.setConditions(headPVA, tailPVA, M);
-        iter_solver.setParameters(inPs, ts);
-        iter_solver.getTrajectory(traj);
+    double total_dur = 0.0;
+    int cur_start = 0;
+    Eigen::Vector3d cur_start_vel = start_vel_;
 
-        // Sample velocity at 20 equally-spaced points per segment
-        double max_vel_sq = 0.0;
-        for (int si = 0; si < M; ++si) {
-            double dur_i = ts(si);
-            for (int k = 0; k <= 20; ++k) {
-                double tau = dur_i * static_cast<double>(k) / 20.0;
-                Eigen::Vector3d vi = traj[si].getVel(tau);
-                double vsq = vi.squaredNorm();
-                if (vsq > max_vel_sq) max_vel_sq = vsq;
+    for (int s = 0; s < static_cast<int>(split_pts.size()); ++s) {
+        int cur_end = split_pts[s];
+        int M_seg   = cur_end - cur_start;
+        if (M_seg < 1) { cur_start = cur_end; continue; }
+
+        // Boundary conditions
+        Eigen::Matrix3d head_s, tail_s;
+        head_s.col(0) = waypoints_[cur_start];
+        head_s.col(1) = cur_start_vel;
+        head_s.col(2) = Eigen::Vector3d::Zero();
+
+        bool is_last_seg = (s == static_cast<int>(split_pts.size()) - 1);
+        Eigen::Vector3d cur_end_vel;
+        if (is_last_seg) {
+            cur_end_vel = end_vel_;          // stop at final goal
+        } else {
+            // Through-corner: fly at up to 40% of v_max in departure direction
+            double d_dep = (waypoints_[cur_end + 1] - waypoints_[cur_end]).norm();
+            Eigen::Vector3d dep_dir;
+            if (d_dep > 1e-6)
+                dep_dir = (waypoints_[cur_end + 1] - waypoints_[cur_end]) / d_dep;
+            else
+                dep_dir = Eigen::Vector3d::UnitX();
+            double junc_speed = std::min(v_max * 0.4, 0.4);
+            cur_end_vel = dep_dir * junc_speed;
+            Info("MINCO: junction vel at WP%d: %.2f m/s\n", cur_end, junc_speed);
+        }
+
+        tail_s.col(0) = waypoints_[cur_end];
+        tail_s.col(1) = cur_end_vel;
+        tail_s.col(2) = Eigen::Vector3d::Zero();
+
+        // Interior waypoints for this sub-segment
+        Eigen::Matrix3Xd inPs_s(3, M_seg - 1);
+        for (int i = 0; i < M_seg - 1; ++i)
+            inPs_s.col(i) = waypoints_[cur_start + i + 1];
+
+        // Chord-length time allocation
+        Eigen::VectorXd ts_s(M_seg);
+        for (int i = 0; i < M_seg; ++i) {
+            double dist = (waypoints_[cur_start + i + 1]
+                        - waypoints_[cur_start + i]).norm();
+            double t_seg = dist / v_max * 1.5;
+            if (t_seg < 0.5) t_seg = 0.5;
+            ts_s(i) = t_seg;
+        }
+
+        // Velocity-aware iterative time scaling
+        Trajectory<5> sub_traj;
+        for (int iter = 0; iter < 5; ++iter) {
+            minco::MINCO_S3NU iter_solver;
+            iter_solver.setConditions(head_s, tail_s, M_seg);
+            iter_solver.setParameters(inPs_s, ts_s);
+            iter_solver.getTrajectory(sub_traj);
+
+            double max_vel_sq = 0.0;
+            for (int si = 0; si < M_seg; ++si) {
+                double dur_i = ts_s(si);
+                for (int kk = 0; kk <= 20; ++kk) {
+                    double tau = dur_i * static_cast<double>(kk) / 20.0;
+                    Eigen::Vector3d vi = sub_traj[si].getVel(tau);
+                    double vsq = vi.squaredNorm();
+                    if (vsq > max_vel_sq) max_vel_sq = vsq;
+                }
             }
+            double max_vel_actual = std::sqrt(max_vel_sq);
+            if (max_vel_actual <= v_max * 1.1) {
+                Info("MINCO seg%d iter%d: max_vel=%.2f (ok)\n", s, iter, max_vel_actual);
+                break;
+            }
+            double scale = max_vel_actual / v_max;
+            Info("MINCO seg%d iter%d: max_vel=%.2f > v_max=%.2f scale=%.2f\n",
+                 s, iter, max_vel_actual, v_max, scale);
+            ts_s *= scale;
         }
-        double max_vel_actual = std::sqrt(max_vel_sq);
-        if (max_vel_actual <= v_max * 1.1) {
-            Info("MINCO iter %d: max_vel=%.2f m/s (within limit)\n", iter, max_vel_actual);
-            break;
-        }
-        double scale = max_vel_actual / v_max;
-        Info("MINCO iter %d: max_vel=%.2f > v_max=%.2f, scaling ts x%.2f\n",
-             iter, max_vel_actual, v_max, scale);
-        ts *= scale;
-        total_dur *= scale;
+
+        // Append pieces into combined trajectory
+        for (int p = 0; p < sub_traj.getPieceNum(); ++p)
+            traj.emplace_back(sub_traj[p]);
+        total_dur += sub_traj.getTotalDuration();
+
+        cur_start     = cur_end;
+        cur_start_vel = cur_end_vel;
     }
 
     // Validate result
@@ -2283,8 +2336,8 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
             double path_len = 0.0;
             for (size_t k = 1; k < full_path.size(); ++k)
                 path_len += (full_path[k] - full_path[k-1]).norm();
-            if (path_len > 4.0 * direct_dist) {
-                Warn("A* detour %.1fm > 4x direct %.1fm — reverting to direct corridor path\n",
+            if (path_len > 2.5 * direct_dist) {
+                Warn("A* detour %.1fm > 2.5x direct %.1fm — reverting to direct corridor path\n",
                      path_len, direct_dist);
                 Eigen::Vector3d start_pt = full_path.front();
                 Eigen::Vector3d goal_pt  = full_path.back();
