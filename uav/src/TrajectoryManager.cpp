@@ -1032,17 +1032,22 @@ bool TrajectoryManager::SolveGCOPTER() {
     double smoothEps = 0.01;           // smoothing factor
     int integralRes = 8;               // integral resolution
 
-    // magnitudeBounds: [max_vel, max_acc, max_jerk (optional)]
-    Eigen::VectorXd magBd(3);
-    magBd << v_max, a_max, 20.0;
+    // magnitudeBounds: [v_max, omg_max, theta_max, thrust_min, thrust_max]
+    // AR.Drone 2.0: mass ~0.42kg, thrust ~4N max per motor (4 motors)
+    Eigen::VectorXd magBd(5);
+    magBd(0) = v_max;          // max velocity (m/s)
+    magBd(1) = 3.0;            // max angular rate (rad/s) — approx for AR.Drone
+    magBd(2) = 0.4;            // max tilt angle (rad) ~23 deg
+    magBd(3) = 4.0;            // min collective thrust (m/s^2) — just above hover
+    magBd(4) = 20.0;           // max collective thrust (m/s^2)
 
-    // penaltyWeights: [velocity, acceleration, jerk penalty]
-    Eigen::VectorXd penWt(3);
-    penWt << 100.0, 100.0, 100.0;
+    // penaltyWeights: [pos, vel, omg, theta, thrust]
+    Eigen::VectorXd penWt(5);
+    penWt << 1e5, 1e5, 1e4, 1e4, 1e4;
 
-    // physicalParams: [gravity, mass, max_tilt, max_thrust, min_thrust, drag_coeff]
+    // physicalParams: [mass, gravity, horiz_drag, vert_drag, parasitic_drag, speed_smooth]
     Eigen::VectorXd physPm(6);
-    physPm << 9.81, 0.5, 1.0, 10.0, 0.5, 0.1;
+    physPm << 0.42, 9.81, 0.01, 0.01, 0.0001, 0.5;  // AR.Drone 2.0 approximate params
 
     bool setup_ok = optimizer.setup(rho, headPVA, tailPVA, hPolytopes,
                                      lengthPerPiece, smoothEps, integralRes,
