@@ -774,6 +774,13 @@ bool TrajectoryManager::SolveMinSnap() {
     }
 
     trajectory_valid_ = true;
+    // Pre-initialize last_pos_ from the first waypoint so GetPosition()
+    // returns a sane value before the first Update() tick in EXECUTING state
+    if (num_waypoints_ > 0) {
+        last_pos_ = Vector3Df(static_cast<float>(waypoints_[0].x()),
+                              static_cast<float>(waypoints_[0].y()),
+                              static_cast<float>(waypoints_[0].z()));
+    }
     return true;
 }
 
@@ -1075,6 +1082,12 @@ bool TrajectoryManager::SolveGCOPTER() {
     // Step 4: Store the result
     gcopter_traj_ = traj;
     gcopter_traj_valid_ = true;
+    // Pre-initialize last_pos_ from start waypoint
+    if (num_waypoints_ > 0) {
+        last_pos_ = Vector3Df(static_cast<float>(waypoints_[0].x()),
+                              static_cast<float>(waypoints_[0].y()),
+                              static_cast<float>(waypoints_[0].z()));
+    }
 
     // Compute total duration and store segment info for compatibility
     total_duration_ = total_dur;
@@ -2038,17 +2051,19 @@ bool TrajectoryManager::BuildCorridors(const std::vector<Eigen::Vector3d> &path,
         // Note: obstacles are already inflated by (radius + safety_margin) in the
         // occupancy grid, so the A* path and the AABB expansion already maintain
         // safety_margin clearance. No additional corridor shrinkage is needed.
-        // Only shrink by a small epsilon to ensure the corridor boundary is strictly
-        // inside free space (avoids numerical edge cases).
-        double eps = grid_res_ * 0.5;
-        x_min += eps;
-        x_max -= eps;
-        y_min += eps;
-        y_max -= eps;
-        z_min += eps;
-        z_max -= eps;
+        // Only shrink by a small epsilon for numerical safety (no double safety margin)
+        double eps = grid_res_ * 0.25;  // reduced from 0.5 to be less aggressive
+        x_min += eps; x_max -= eps;
+        y_min += eps; y_max -= eps;
+        z_min += eps; z_max -= eps;
 
-        // Check corridor didn't collapse
+        // If corridor collapsed (too thin after epsilon shrink), relax:
+        // Try with no epsilon, just ensure lo < hi
+        if (x_min >= x_max) { double mid = 0.5*(x_min+x_max); x_min = mid - grid_res_*0.5; x_max = mid + grid_res_*0.5; }
+        if (y_min >= y_max) { double mid = 0.5*(y_min+y_max); y_min = mid - grid_res_*0.5; y_max = mid + grid_res_*0.5; }
+        if (z_min >= z_max) { double mid = 0.5*(z_min+z_max); z_min = mid - grid_res_*0.5; z_max = mid + grid_res_*0.5; }
+
+        // Final collapse check
         if (x_min >= x_max || y_min >= y_max || z_min >= z_max) {
             Warn("corridor collapsed for segment %d (try reducing safety margin or obstacle radius)\n", seg);
             return false;

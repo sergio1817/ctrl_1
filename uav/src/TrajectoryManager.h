@@ -143,6 +143,7 @@ private:
     // GCOPTER/MINCO backend
     bool use_gcopter_;  // true when GCOPTER/MINCO backend is selected
     Trajectory<5> gcopter_traj_;  // stored GCOPTER trajectory (degree 5)
+    bool use_gcopter_traj_;        // true when GCOPTER produced the trajectory
     bool gcopter_traj_valid_;     // true when gcopter_traj_ has valid data
 
     // Timing
