@@ -281,6 +281,20 @@ void TrajectoryManager::Update(Time time,
             j = EvalJer(elapsed);
         }
 
+        // Safety clamp: prevent runaway velocity commands if MINCO polynomial
+        // overshoots (e.g. due to sharp path corners or insufficient time alloc).
+        // Hard limit at 1.5 * v_max; zero acceleration/jerk when clamped.
+        {
+            double v_max_lim = max_vel_->Value();
+            if (v_max_lim < 0.1) v_max_lim = 0.1;
+            double v_norm = v.norm();
+            if (v_norm > v_max_lim * 1.5) {
+                v *= (v_max_lim * 1.5 / v_norm);
+                a = Eigen::Vector3d::Zero();
+                j = Eigen::Vector3d::Zero();
+            }
+        }
+
         // Thread-safe matrix update (Flair pattern)
         output_matrix_->GetMutex();
         output_matrix_->SetValueNoMutex(0, 0, static_cast<float>(p.y()));  // des_x (swapped)
@@ -316,8 +330,9 @@ void TrajectoryManager::Update(Time time,
             Eigen::Vector3d p_end = (use_gcopter_ && gcopter_traj_valid_)
                 ? gcopter_traj_.getPos(total_duration_)
                 : EvalPos(total_duration_);
-            last_pos_ = Vector3Df(static_cast<float>(p_end.x()),
-                                  static_cast<float>(p_end.y()),
+            // p_end is in planner frame; swap x/y back to world frame
+            last_pos_ = Vector3Df(static_cast<float>(p_end.y()),   // world_x = planner_y
+                                  static_cast<float>(p_end.x()),   // world_y = planner_x
                                   static_cast<float>(p_end.z()));
             last_vel_ = Vector3Df(0, 0, 0);
             last_acc_ = Vector3Df(0, 0, 0);
@@ -426,7 +441,8 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
 
     ReadWaypointsFromGUI();
 
-    start_vel_ = Eigen::Vector3d(current_vel.x, current_vel.y, current_vel.z);
+    // Swap x/y to match planner internal frame (planner_x=world_y, planner_y=world_x)
+    start_vel_ = Eigen::Vector3d(current_vel.y, current_vel.x, current_vel.z);
     end_vel_ = Eigen::Vector3d::Zero();
 
     // Validate Z (NED): warn if any waypoint z > -0.3 (too close to ground)
@@ -1059,13 +1075,40 @@ bool TrajectoryManager::SolveGCOPTER() {
         inPs.col(i) = waypoints_[i + 1];  // waypoints_[0]=start, waypoints_[M]=end
     }
 
-    // Direct MINCO_S3NU solve: banded LU, O(N) — no iterative optimizer
-    minco::MINCO_S3NU solver;
-    solver.setConditions(headPVA, tailPVA, M);
-    solver.setParameters(inPs, ts);
-
+    // Velocity-aware iterative time allocation.
+    // Solve MINCO, sample max velocity across all segments; if it exceeds v_max
+    // scale every segment duration up proportionally and re-solve (up to 5 iters).
+    // This eliminates the ±4 m/s polynomial peaks that MINCO_S3NU does not
+    // internally constrain.
     Trajectory<5> traj;
-    solver.getTrajectory(traj);
+    for (int iter = 0; iter < 5; ++iter) {
+        minco::MINCO_S3NU iter_solver;
+        iter_solver.setConditions(headPVA, tailPVA, M);
+        iter_solver.setParameters(inPs, ts);
+        iter_solver.getTrajectory(traj);
+
+        // Sample velocity at 20 equally-spaced points per segment
+        double max_vel_sq = 0.0;
+        for (int si = 0; si < M; ++si) {
+            double dur_i = ts(si);
+            for (int k = 0; k <= 20; ++k) {
+                double tau = dur_i * static_cast<double>(k) / 20.0;
+                Eigen::Vector3d vi = traj[si].getVel(tau);
+                double vsq = vi.squaredNorm();
+                if (vsq > max_vel_sq) max_vel_sq = vsq;
+            }
+        }
+        double max_vel_actual = std::sqrt(max_vel_sq);
+        if (max_vel_actual <= v_max * 1.1) {
+            Info("MINCO iter %d: max_vel=%.2f m/s (within limit)\n", iter, max_vel_actual);
+            break;
+        }
+        double scale = max_vel_actual / v_max;
+        Info("MINCO iter %d: max_vel=%.2f > v_max=%.2f, scaling ts x%.2f\n",
+             iter, max_vel_actual, v_max, scale);
+        ts *= scale;
+        total_dur *= scale;
+    }
 
     // Validate result
     int N = traj.getPieceNum();
@@ -2226,6 +2269,29 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
         // Append (skip first to avoid duplicates)
         for (size_t j = 1; j < seg_path.size(); ++j) {
             full_path.push_back(seg_path[j]);
+        }
+    }
+
+    // Excessive-detour guard: if the A* path is more than 4x longer than the
+    // direct start-to-goal distance, the path has taken a huge detour (e.g. because
+    // the x/y-swapped obstacle is blocking the route at a bad angle). In that case
+    // drop all intermediate points and let GCOPTER handle it via FIRI corridors;
+    // this prevents the MINCO polynomial from oscillating ±3 m around distant waypoints.
+    if (full_path.size() >= 2) {
+        double direct_dist = (full_path.back() - full_path.front()).norm();
+        if (direct_dist > 0.5) {
+            double path_len = 0.0;
+            for (size_t k = 1; k < full_path.size(); ++k)
+                path_len += (full_path[k] - full_path[k-1]).norm();
+            if (path_len > 4.0 * direct_dist) {
+                Warn("A* detour %.1fm > 4x direct %.1fm — reverting to direct corridor path\n",
+                     path_len, direct_dist);
+                Eigen::Vector3d start_pt = full_path.front();
+                Eigen::Vector3d goal_pt  = full_path.back();
+                full_path.clear();
+                full_path.push_back(start_pt);
+                full_path.push_back(goal_pt);
+            }
         }
     }
 
