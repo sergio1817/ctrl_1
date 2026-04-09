@@ -237,8 +237,9 @@ void TrajectoryManager::Update(Time time,
                                const Vector3Df &uav_pos,
                                const Vector3Df &uav_vel) {
     // Store current UAV position so Plan() can use it as WP0
-    current_uav_pos_ = Eigen::Vector3d(uav_pos.x, uav_pos.y, uav_pos.z);
-    current_uav_vel_ = Eigen::Vector3d(uav_vel.x, uav_vel.y, uav_vel.z);
+    // Swap x and y to match planner's internal frame
+    current_uav_pos_ = Eigen::Vector3d(uav_pos.y, uav_pos.x, uav_pos.z);
+    current_uav_vel_ = Eigen::Vector3d(uav_vel.y, uav_vel.x, uav_vel.z);
 
     // Check GUI buttons
     if (plan_button_->Clicked()) {
@@ -282,34 +283,27 @@ void TrajectoryManager::Update(Time time,
 
         // Thread-safe matrix update (Flair pattern)
         output_matrix_->GetMutex();
-        output_matrix_->SetValueNoMutex(0, 0, static_cast<float>(p.x()));
-        output_matrix_->SetValueNoMutex(1, 0, static_cast<float>(p.y()));
+        output_matrix_->SetValueNoMutex(0, 0, static_cast<float>(p.y()));  // des_x (swapped)
+        output_matrix_->SetValueNoMutex(1, 0, static_cast<float>(p.x()));  // des_y (swapped)
         output_matrix_->SetValueNoMutex(2, 0, static_cast<float>(p.z()));
-        output_matrix_->SetValueNoMutex(3, 0, static_cast<float>(v.x()));
-        output_matrix_->SetValueNoMutex(4, 0, static_cast<float>(v.y()));
+        output_matrix_->SetValueNoMutex(3, 0, static_cast<float>(v.y()));  // des_vx (swapped)
+        output_matrix_->SetValueNoMutex(4, 0, static_cast<float>(v.x()));  // des_vy (swapped)
         output_matrix_->SetValueNoMutex(5, 0, static_cast<float>(v.z()));
-        output_matrix_->SetValueNoMutex(6, 0, static_cast<float>(a.x()));
-        output_matrix_->SetValueNoMutex(7, 0, static_cast<float>(a.y()));
+        output_matrix_->SetValueNoMutex(6, 0, static_cast<float>(a.y()));  // des_ax (swapped)
+        output_matrix_->SetValueNoMutex(7, 0, static_cast<float>(a.x()));  // des_ay (swapped)
         output_matrix_->SetValueNoMutex(8, 0, static_cast<float>(a.z()));
-        output_matrix_->SetValueNoMutex(9, 0, static_cast<float>(j.x()));
-        output_matrix_->SetValueNoMutex(10, 0, static_cast<float>(j.y()));
+        output_matrix_->SetValueNoMutex(9, 0, static_cast<float>(j.y()));  // des_jx (swapped)
+        output_matrix_->SetValueNoMutex(10, 0, static_cast<float>(j.x())); // des_jy (swapped)
         output_matrix_->SetValueNoMutex(11, 0, static_cast<float>(j.z()));
         output_matrix_->SetValueNoMutex(12, 0, prog);
         output_matrix_->ReleaseMutex();
 
         // Store for GetPosition/GetSpeed/etc accessors
-        last_pos_ = Vector3Df(static_cast<float>(p.x()),
-                              static_cast<float>(p.y()),
-                              static_cast<float>(p.z()));
-        last_vel_ = Vector3Df(static_cast<float>(v.x()),
-                              static_cast<float>(v.y()),
-                              static_cast<float>(v.z()));
-        last_acc_ = Vector3Df(static_cast<float>(a.x()),
-                              static_cast<float>(a.y()),
-                              static_cast<float>(a.z()));
-        last_jerk_ = Vector3Df(static_cast<float>(j.x()),
-                               static_cast<float>(j.y()),
-                               static_cast<float>(j.z()));
+        // Swap x/y back to world frame for controller output
+        last_pos_  = Vector3Df(static_cast<float>(p.y()), static_cast<float>(p.x()), static_cast<float>(p.z()));
+        last_vel_  = Vector3Df(static_cast<float>(v.y()), static_cast<float>(v.x()), static_cast<float>(v.z()));
+        last_acc_  = Vector3Df(static_cast<float>(a.y()), static_cast<float>(a.x()), static_cast<float>(a.z()));
+        last_jerk_ = Vector3Df(static_cast<float>(j.y()), static_cast<float>(j.x()), static_cast<float>(j.z()));
         progress_ = prog;
 
         // Signal data update to DataPlot framework
@@ -342,7 +336,7 @@ void TrajectoryManager::Update(Time time,
     } else if (state_ == State::HOLDING) {
         // Holding final position — output last_pos_ with zero derivatives
         output_matrix_->GetMutex();
-        output_matrix_->SetValueNoMutex(0, 0, last_pos_.x);
+        output_matrix_->SetValueNoMutex(0, 0, last_pos_.x);  // already swapped
         output_matrix_->SetValueNoMutex(1, 0, last_pos_.y);
         output_matrix_->SetValueNoMutex(2, 0, last_pos_.z);
         for (int i = 3; i < 12; ++i) {
@@ -575,13 +569,13 @@ void TrajectoryManager::ClearObstacles() {
 
 void TrajectoryManager::UpdateObstaclePosition(int idx, const Vector3Df &pos) {
     if (idx >= 0 && idx < num_obstacles_) {
-        obstacles_[idx].pos = Eigen::Vector3d(pos.x, pos.y, pos.z);
+        obstacles_[idx].pos = Eigen::Vector3d(pos.y, pos.x, pos.z);  // swap x/y
     }
 }
 
 void TrajectoryManager::UpdateObstacleVelocity(int idx, const Vector3Df &vel) {
     if (idx >= 0 && idx < num_obstacles_) {
-        obstacles_[idx].vel = Eigen::Vector3d(vel.x, vel.y, vel.z);
+        obstacles_[idx].vel = Eigen::Vector3d(vel.y, vel.x, vel.z);  // swap x/y
     }
 }
 
@@ -594,8 +588,9 @@ void TrajectoryManager::ReadWaypointsFromGUI() {
     if (num_waypoints_ > MAX_GUI_WAYPOINTS) num_waypoints_ = MAX_GUI_WAYPOINTS;
 
     for (int i = 0; i < num_waypoints_; ++i) {
-        waypoints_[i] = Eigen::Vector3d(wp_x_[i]->Value(),
-                                         wp_y_[i]->Value(),
+        // Swap x and y: GUI label "X" is physical forward but planner x is right
+        waypoints_[i] = Eigen::Vector3d(wp_y_[i]->Value(),
+                                         wp_x_[i]->Value(),
                                          wp_z_[i]->Value());
     }
 }
@@ -793,8 +788,9 @@ bool TrajectoryManager::SolveMinSnap() {
     // Pre-initialize last_pos_ from the first waypoint so GetPosition()
     // returns a sane value before the first Update() tick in EXECUTING state
     if (num_waypoints_ > 0) {
-        last_pos_ = Vector3Df(static_cast<float>(waypoints_[0].x()),
-                              static_cast<float>(waypoints_[0].y()),
+        // waypoints_[0] is in planner frame — swap back for controller output
+        last_pos_ = Vector3Df(static_cast<float>(waypoints_[0].y()),
+                              static_cast<float>(waypoints_[0].x()),
                               static_cast<float>(waypoints_[0].z()));
     }
     return true;
@@ -1085,10 +1081,10 @@ bool TrajectoryManager::SolveGCOPTER() {
     // Step 4: Store the result
     gcopter_traj_ = traj;
     gcopter_traj_valid_ = true;
-    // Pre-initialize last_pos_ from start waypoint
+    // Pre-initialize last_pos_ from start waypoint (swap x/y back to world frame)
     if (num_waypoints_ > 0) {
-        last_pos_ = Vector3Df(static_cast<float>(waypoints_[0].x()),
-                              static_cast<float>(waypoints_[0].y()),
+        last_pos_ = Vector3Df(static_cast<float>(waypoints_[0].y()),
+                              static_cast<float>(waypoints_[0].x()),
                               static_cast<float>(waypoints_[0].z()));
     }
 
