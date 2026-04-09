@@ -72,7 +72,10 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       total_duration_(0.0),
       trajectory_valid_(false),
       use_gcopter_(false),
+      use_gcopter_traj_(false),
       gcopter_traj_valid_(false),
+      current_uav_pos_(Eigen::Vector3d::Zero()),
+      current_uav_vel_(Eigen::Vector3d::Zero()),
       execution_start_time_(0.0),
       last_replan_time_(0.0),
       num_waypoints_(2),
@@ -229,12 +232,16 @@ TrajectoryManager::~TrajectoryManager() {
 // ============================================================
 // Update - called from control loop at each tick
 // ============================================================
-void TrajectoryManager::Update(Time time) {
+void TrajectoryManager::Update(Time time,
+                               const Vector3Df &uav_pos,
+                               const Vector3Df &uav_vel) {
+    // Store current UAV position so Plan() can use it as WP0
+    current_uav_pos_ = Eigen::Vector3d(uav_pos.x, uav_pos.y, uav_pos.z);
+    current_uav_vel_ = Eigen::Vector3d(uav_vel.x, uav_vel.y, uav_vel.z);
+
     // Check GUI buttons
     if (plan_button_->Clicked()) {
-        Vector3Df dummy_pos(0, 0, 0);
-        Vector3Df dummy_vel(0, 0, 0);
-        Plan(dummy_pos, dummy_vel);
+        Plan(uav_pos, uav_vel);
     }
     if (execute_button_->Clicked() && state_ == State::PLANNED) {
         StartTraj();
@@ -1016,7 +1023,12 @@ bool TrajectoryManager::SolveGCOPTER() {
         return false;
     }
 
-    // Step 2: Set up GCOPTER optimizer
+    // Step 2: Use MINCO_S3NU for direct banded-LU solve (no L-BFGS, no physical params).
+    // GCOPTER_PolytopeSFC requires full quadrotor aerodynamics — not suitable for our
+    // approximate parameters. MINCO_S3NU gives the same trajectory representation
+    // (degree-5 MINCO polynomial) with a direct O(N) banded solve.
+    int M = num_segments_;
+
     Eigen::Matrix3d headPVA, tailPVA;
     headPVA.col(0) = waypoints_[0];
     headPVA.col(1) = start_vel_;
@@ -1025,62 +1037,39 @@ bool TrajectoryManager::SolveGCOPTER() {
     tailPVA.col(1) = end_vel_;
     tailPVA.col(2) = Eigen::Vector3d::Zero();
 
-    gcopter::GCOPTER_PolytopeSFC optimizer;
-
-    double rho = 1.0;                  // time weight
-    double lengthPerPiece = 1.0;       // meters per MINCO piece
-    double smoothEps = 0.01;           // smoothing factor
-    int integralRes = 8;               // integral resolution
-
-    // magnitudeBounds: [v_max, omg_max, theta_max, thrust_min, thrust_max]
-    // AR.Drone 2.0: mass ~0.42kg, thrust ~4N max per motor (4 motors)
-    Eigen::VectorXd magBd(5);
-    magBd(0) = v_max;          // max velocity (m/s)
-    magBd(1) = 3.0;            // max angular rate (rad/s) — approx for AR.Drone
-    magBd(2) = 0.4;            // max tilt angle (rad) ~23 deg
-    magBd(3) = 4.0;            // min collective thrust (m/s^2) — just above hover
-    magBd(4) = 20.0;           // max collective thrust (m/s^2)
-
-    // penaltyWeights: [pos, vel, omg, theta, thrust]
-    Eigen::VectorXd penWt(5);
-    penWt << 1e5, 1e5, 1e4, 1e4, 1e4;
-
-    // physicalParams: [mass, gravity, horiz_drag, vert_drag, parasitic_drag, speed_smooth]
-    Eigen::VectorXd physPm(6);
-    physPm << 0.42, 9.81, 0.01, 0.01, 0.0001, 0.5;  // AR.Drone 2.0 approximate params
-
-    bool setup_ok = optimizer.setup(rho, headPVA, tailPVA, hPolytopes,
-                                     lengthPerPiece, smoothEps, integralRes,
-                                     magBd, penWt, physPm);
-    if (!setup_ok) {
-        Warn("GCOPTER setup failed\n");
-        return false;
+    // Time allocation: distance / v_max with 1.5x scaling
+    Eigen::VectorXd ts(M);
+    double total_dur = 0.0;
+    for (int i = 0; i < M; ++i) {
+        double dist = (waypoints_[i+1] - waypoints_[i]).norm();
+        double t_seg = dist / v_max * 1.5;
+        if (t_seg < 0.5) t_seg = 0.5;
+        ts(i) = t_seg;
+        total_dur += t_seg;
     }
 
-    // Step 3: Optimize
-    Trajectory<5> traj;
-    double cost = optimizer.optimize(traj, 1e-4);
-    (void)cost;
+    // Interior waypoints (M-1 intermediate points between start and end)
+    Eigen::Matrix3Xd inPs(3, M - 1);
+    for (int i = 0; i < M - 1; ++i) {
+        inPs.col(i) = waypoints_[i + 1];  // waypoints_[0]=start, waypoints_[M]=end
+    }
 
-    // (d)(e) Validate optimization result
+    // Direct MINCO_S3NU solve: banded LU, O(N) — no iterative optimizer
+    minco::MINCO_S3NU solver;
+    solver.setConditions(headPVA, tailPVA, M);
+    solver.setParameters(inPs, ts);
+
+    Trajectory<5> traj;
+    solver.getTrajectory(traj);
+
+    // Validate result
     int N = traj.getPieceNum();
     if (N < 1) {
-        Warn("GCOPTER optimization returned %d pieces\n", N);
+        Warn("MINCO solve returned %d pieces\n", N);
         return false;
     }
-
-    // Check all durations are positive
-    for (int i = 0; i < N; ++i) {
-        if (traj[i].getDuration() <= 0.0) {
-            Warn("GCOPTER: piece %d has non-positive duration %.4f\n",
-                 i, traj[i].getDuration());
-            return false;
-        }
-    }
-
-    double total_dur = traj.getTotalDuration();
-    if (total_dur <= 0.0 || std::isnan(total_dur) || std::isinf(total_dur)) {
-        Warn("GCOPTER: invalid total duration %.4f\n", total_dur);
+    if (std::isnan(total_dur) || std::isinf(total_dur) || total_dur <= 0.0) {
+        Warn("MINCO: invalid total duration %.4f\n", total_dur);
         return false;
     }
 

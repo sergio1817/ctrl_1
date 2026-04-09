@@ -912,7 +912,7 @@ void ctrl1::sliding_ctrl_pos(Euler &torques){
     }
 
     // Update trajectory planner before reading references
-    traj_manager_->Update(GetTime());
+    traj_manager_->Update(GetTime(), uav_pos, uav_vel);
 
     pos_reference(xid, xidp, xidpp, xidppp, tactual);
 

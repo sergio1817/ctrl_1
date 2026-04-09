@@ -66,7 +66,9 @@ public:
     // -------------------------------------------------------
     // Trajectory evaluation
     // -------------------------------------------------------
-    void Update(flair::core::Time time);
+    void Update(flair::core::Time time,
+                const flair::core::Vector3Df &uav_pos = flair::core::Vector3Df(0,0,0),
+                const flair::core::Vector3Df &uav_vel = flair::core::Vector3Df(0,0,0));
     void GetPosition(flair::core::Vector3Df &pos) const;
     void GetSpeed(flair::core::Vector3Df &vel) const;
     void GetAcceleration(flair::core::Vector3Df &acc) const;
@@ -145,6 +147,10 @@ private:
     Trajectory<5> gcopter_traj_;  // stored GCOPTER trajectory (degree 5)
     bool use_gcopter_traj_;        // true when GCOPTER produced the trajectory
     bool gcopter_traj_valid_;     // true when gcopter_traj_ has valid data
+
+    // Current UAV state (updated each tick from ctrl1)
+    Eigen::Vector3d current_uav_pos_;
+    Eigen::Vector3d current_uav_vel_;
 
     // Timing
     double execution_start_time_;
