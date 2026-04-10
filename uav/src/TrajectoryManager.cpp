@@ -48,6 +48,28 @@ using namespace flair::gui;
 // w=1.3 gives 3-5x speedup with paths within 30% of optimal
 static const float ASTAR_WEIGHT = 1.3f;
 
+// ============================================================
+// Coordinate Frame Conventions
+// ============================================================
+// World frame (Flair/Aerospace NED): x=forward, y=right, z=down
+//   - Ground at z=0, flight altitude at z<0 (e.g., z=-1.5)
+//   - Gravity vector: (0, 0, +9.81) in NED
+//
+// Planner internal frame: x/y SWAPPED from world
+//   - planner_x = world_y (right)
+//   - planner_y = world_x (forward)
+//   - planner_z = world_z (down, negative = up)
+//   - Swap applied at input: ReadWaypointsFromGUI(), Update(), UpdateObstaclePosition()
+//   - Swap reversed at output: output_matrix_ SetValue calls, last_pos_/vel_/acc_/jerk_
+//
+// GCOPTER library (flatness.hpp): assumes z-UP (ENU-like) internally
+//   - flatness.hpp line 79: zu2 = a2 + grav assumes gravity adds to z (z points up)
+//   - This affects the constrained solver's penalty functional (thrust, tilt, body-rate)
+//   - For mainly horizontal flight the impact is negligible (tilt≈0, thrust≈mg)
+//   - The trajectory positions/velocities from MINCO are purely kinematic (frame-agnostic)
+//   - TODO: For aggressive vertical maneuvers, negate z before/after the constrained solver
+// ============================================================
+
 // Workspace bounds (NED: z negative = up, ground at z=0)
 // Default workspace bounds (overridden by GUI values in Plan())
 
@@ -756,7 +778,7 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
 // ============================================================
 void TrajectoryManager::AddObstacle(const Vector3Df &pos, float radius) {
     if (num_obstacles_ < MAX_OBSTACLES) {
-        obstacles_[num_obstacles_].pos = Eigen::Vector3d(pos.x, pos.y, pos.z);
+        obstacles_[num_obstacles_].pos = Eigen::Vector3d(pos.y, pos.x, pos.z);  // swap x/y to planner frame
         obstacles_[num_obstacles_].vel = Eigen::Vector3d::Zero();
         obstacles_[num_obstacles_].radius = static_cast<double>(radius);
         num_obstacles_++;
@@ -1172,65 +1194,9 @@ bool TrajectoryManager::SolveGCOPTER() {
         }
     }
 
-    // Step 1: For each path segment, run FIRI to build polytope corridors
-    // Workspace bounding box as H-representation: Ax <= b encoded as Nx4 [a1 a2 a3 b]
-    // where a1*x + a2*y + a3*z + b <= 0
-    Eigen::MatrixX4d bdBox(6, 4);
-    bdBox.row(0) << 1.0, 0.0, 0.0, -WS_X_MAX;   // x <= WS_X_MAX
-    bdBox.row(1) << -1.0, 0.0, 0.0, WS_X_MIN;    // -x <= -WS_X_MIN  i.e. x >= WS_X_MIN
-    bdBox.row(2) << 0.0, 1.0, 0.0, -WS_Y_MAX;
-    bdBox.row(3) << 0.0, -1.0, 0.0, WS_Y_MIN;
-    bdBox.row(4) << 0.0, 0.0, 1.0, -WS_Z_MAX;
-    bdBox.row(5) << 0.0, 0.0, -1.0, WS_Z_MIN;
-
-    typedef std::vector<Eigen::MatrixX4d> PolyhedraH;
-    PolyhedraH hPolytopes;
-    double search_radius = 2.0;  // meters around each segment to search for obstacles
-    bool any_degenerate = false;
-
-    for (int i = 0; i < num_segments_; ++i) {
-        Eigen::Vector3d seg_a = waypoints_[i];
-        Eigen::Vector3d seg_b = waypoints_[i + 1];
-
-        // Get obstacle points near this segment
-        Eigen::Matrix3Xd obs_pc;
-        std::vector<Eigen::Vector3d> obs_pts = GetNearbyObstaclePoints(seg_a, seg_b, search_radius);
-        obs_pc.resize(3, static_cast<int>(obs_pts.size()));
-        for (int j = 0; j < static_cast<int>(obs_pts.size()); ++j) {
-            obs_pc.col(j) = obs_pts[j];
-        }
-
-        Eigen::MatrixX4d hPoly;
-        bool firi_ok = false;
-
-        // (a) Check if obs_pc has at least 4 non-coplanar points before calling FIRI
-        if (obs_pc.cols() == 0 || HasNonCoplanarPoints(obs_pc)) {
-            firi_ok = firi::firi(bdBox, obs_pc, seg_a, seg_b, hPoly);
-        }
-
-        if (!firi_ok) {
-            Warn("FIRI failed for segment %d, using bounding box\n", i);
-            hPoly = bdBox;
-        }
-
-        // (b) Validate the polytope: at least 4 faces and segment endpoints inside
-        if (hPoly.rows() < 4 ||
-            !IsInsidePolytope(hPoly, seg_a) ||
-            !IsInsidePolytope(hPoly, seg_b)) {
-            Warn("segment %d polytope degenerate (rows=%d), using bounding box\n",
-                 i, static_cast<int>(hPoly.rows()));
-            hPoly = bdBox;
-            any_degenerate = true;
-        }
-
-        hPolytopes.push_back(hPoly);
-    }
-
-    // (c) If any polytopes were degenerate, fall back to min-snap
-    if (any_degenerate) {
-        Warn("GCOPTER: degenerate polytopes detected, falling back to min-snap\n");
-        return false;
-    }
+    // NOTE: Step 1 (FIRI corridor generation) was removed — it was dead code.
+    // FIRI corridors are only meaningful for the constrained solver in
+    // PlanWithObstacleAvoidance() → GenerateCorridors() → SolveGCOPTERConstrained().
 
     // Step 2: MINCO_S3NU with direction-reversal splitting.
     //
@@ -1365,6 +1331,15 @@ bool TrajectoryManager::SolveGCOPTER() {
     // Step 4: Store the result
     gcopter_traj_ = traj;
     gcopter_traj_valid_ = true;
+
+    // Post-solve validation using analytical max-rate
+    {
+        double actual_max_vel = gcopter_traj_.getMaxVelRate();
+        double actual_max_acc = gcopter_traj_.getMaxAccRate();
+        Info("MINCO validation: max_vel=%.2f/%.2f max_acc=%.2f/%.2f\n",
+             actual_max_vel, v_max, actual_max_acc, a_max);
+    }
+
     // Pre-initialize last_pos_ from start waypoint (swap x/y back to world frame)
     if (num_waypoints_ > 0) {
         last_pos_ = Vector3Df(static_cast<float>(waypoints_[0].y()),
@@ -1435,9 +1410,10 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
     double grav = 9.81;
     double thrust_min = mass * grav * 0.2;
     double thrust_max = mass * grav * 1.8;
+    double omega_max = 6.0;  // rad/s — typical quadrotor max body rate
     Eigen::VectorXd magnitudeBounds(5);
     magnitudeBounds << v_max,           // max velocity (m/s)
-                       a_max / grav,    // max body rate ~ a_max/g (rad/s, conservative)
+                       omega_max,       // max body rate (rad/s)
                        M_PI / 4.0,      // max tilt angle (45 deg)
                        thrust_min,      // min thrust (N)
                        thrust_max;      // max thrust (N)
@@ -1451,8 +1427,12 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
                       10.0;      // thrust penalty
 
     // Physical params: [mass, grav, drag_coeff_x, drag_coeff_y, drag_coeff_z, yaw_dot]
+    // NOTE: GCOPTER's flatness map assumes z-UP (ENU). Our planner uses NED (z-down).
+    // The penalty functional (thrust/tilt/body-rate) has a frame mismatch for vertical
+    // maneuvers. For horizontal indoor flight this is negligible. The corridor position
+    // constraint and velocity magnitude check are frame-independent.
     Eigen::VectorXd physicalParams(6);
-    physicalParams << mass, grav, 0.0, 0.0, 0.0, 0.0;
+    physicalParams << mass, grav, 0.0, 0.0, 0.0, 1e-4;
 
     gcopter::GCOPTER_PolytopeSFC solver;
     if (!solver.setup(timeWeight, headPVA, tailPVA, hPolytopes,
@@ -1474,6 +1454,23 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
     // Store result
     gcopter_traj_ = traj;
     gcopter_traj_valid_ = true;
+
+    // Post-solve validation using GCOPTER's analytical max-rate computation
+    {
+        double actual_max_vel = gcopter_traj_.getMaxVelRate();
+        double actual_max_acc = gcopter_traj_.getMaxAccRate();
+        if (actual_max_vel > v_max * 1.5) {
+            Warn("GCOPTER constrained: max velocity %.2f exceeds limit %.2f by >50%%\n",
+                 actual_max_vel, v_max);
+        }
+        if (actual_max_acc > a_max * 2.0) {
+            Warn("GCOPTER constrained: max accel %.2f exceeds limit %.2f by >100%%\n",
+                 actual_max_acc, a_max);
+        }
+        Info("GCOPTER validation: max_vel=%.2f/%.2f max_acc=%.2f/%.2f\n",
+             actual_max_vel, v_max, actual_max_acc, a_max);
+    }
+
     total_duration_ = traj.getTotalDuration();
     int N = traj.getPieceNum();
     num_segments_ = std::min(N, MAX_SEGMENTS);
