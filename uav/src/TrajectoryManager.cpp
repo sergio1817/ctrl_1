@@ -2319,73 +2319,68 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
             Info("A* WP%d->WP%d: found path with %d points\n",
                  i, i+1, static_cast<int>(seg_path.size()));
         }
+
+        // Per-segment detour / reversal guard.
+        //
+        // Check ONLY this individual A* segment (WP_i → WP_{i+1}) for
+        // internal reversals or excessive detours.  If found AND the
+        // direct WP_i→WP_{i+1} line is obstacle-free, replace the A*
+        // path with a direct segment.  If the direct is blocked, keep
+        // the A* path — MINCO’s reversal-split will handle it.
+        //
+        // Crucially this does NOT touch reversals that occur at the
+        // JUNCTION between two consecutive GUI waypoints (e.g. the turn
+        // at WP2 in a WP0→WP1→WP2→WP3→WP4 path).  Those are
+        // intentional direction changes that the user designed.
+        if (seg_path.size() >= 3) {
+            double seg_direct = (seg_path.back() - seg_path.front()).norm();
+            double seg_len = 0.0;
+            for (size_t kk = 1; kk < seg_path.size(); ++kk)
+                seg_len += (seg_path[kk] - seg_path[kk-1]).norm();
+
+            bool seg_reversal = false;
+            for (size_t kk = 1; kk + 1 < seg_path.size(); ++kk) {
+                Eigen::Vector3d d1 = seg_path[kk]   - seg_path[kk-1];
+                Eigen::Vector3d d2 = seg_path[kk+1] - seg_path[kk];
+                double n1 = d1.norm(), n2 = d2.norm();
+                if (n1 > 1e-6 && n2 > 1e-6 && (d1 / n1).dot(d2 / n2) < 0.0) {
+                    seg_reversal = true;
+                    break;
+                }
+            }
+
+            bool seg_detour = (seg_direct > 0.1) && (seg_len > 2.5 * seg_direct);
+
+            if (seg_reversal || seg_detour) {
+                if (IsSegmentFree(waypoints_[i], waypoints_[i + 1])) {
+                    Info("A* seg %d->%d: reversal/detour, direct free — using direct\n", i, i+1);
+                    seg_path.clear();
+                    seg_path.push_back(waypoints_[i]);
+                    seg_path.push_back(waypoints_[i + 1]);
+                } else {
+                    Info("A* seg %d->%d: reversal/detour, direct blocked — keeping A*\n", i, i+1);
+                }
+            }
+        }
+
         // Append (skip first to avoid duplicates)
         for (size_t j = 1; j < seg_path.size(); ++j) {
             full_path.push_back(seg_path[j]);
         }
     }
 
-    // Detour / reversal guard.
-    //
-    // Two independent triggers both revert to a direct [start, goal] path:
-    //
-    //  (A) Distance ratio: path_len > 2.5 × direct_dist
-    //      Catches large U-shape detours regardless of turn angle.
-    //
-    //  (B) Direction reversal: any consecutive waypoint triple has
-    //      an angle > 90° (dot product < 0).
-    //      Even a moderate reversal forces MINCO to produce a near-zero
-    //      velocity crossing *inside* the approach sub-segment, which
-    //      the user sees as a mid-flight stop.
-    //
-    // When triggered we fly direct start→goal and let GCOPTER/FIRI handle
-    // keeping the trajectory clear of the obstacle through corridor geometry.
+    // Diagnostic log for the complete concatenated path.
+    // No global intervention — per-segment guards above handle individual A*
+    // detours, and MINCO’s reversal-split handles direction changes at the
+    // junctions between user-specified GUI waypoints.
     if (full_path.size() >= 2) {
-        // (A) distance ratio
         double direct_dist = (full_path.back() - full_path.front()).norm();
         double path_len = 0.0;
         for (size_t k = 1; k < full_path.size(); ++k)
             path_len += (full_path[k] - full_path[k-1]).norm();
-
-        // (B) direction reversal
-        bool has_reversal = false;
-        int  reversal_idx = -1;
-        for (size_t k = 1; k + 1 < full_path.size(); ++k) {
-            Eigen::Vector3d d1 = full_path[k]   - full_path[k-1];
-            Eigen::Vector3d d2 = full_path[k+1] - full_path[k];
-            double n1 = d1.norm(), n2 = d2.norm();
-            if (n1 > 1e-6 && n2 > 1e-6 && (d1 / n1).dot(d2 / n2) < 0.0) {
-                has_reversal = true;
-                reversal_idx = static_cast<int>(k);
-                break;
-            }
-        }
-
-        // Always log so we can diagnose from the Flair console
-        Info("A* guard: pts=%d len=%.2f direct=%.2f ratio=%.2f reversal=%d(idx=%d)\n",
+        Info("A* full path: pts=%d len=%.2f direct=%.2f ratio=%.2f\n",
              static_cast<int>(full_path.size()), path_len, direct_dist,
-             direct_dist > 1e-6 ? path_len / direct_dist : 0.0,
-             has_reversal ? 1 : 0, reversal_idx);
-
-        // Guard only makes sense when start and goal are far apart.
-        // For loop trajectories (WP_last ≈ WP_first, direct_dist ≈ 0) reverting to
-        // [start, goal] produces a degenerate zero-displacement MINCO trajectory.
-        // In that case skip the guard entirely: the full A* path is kept and
-        // MINCO's reversal-split provides through-velocity at the junction.
-        bool guard_applicable = (direct_dist > 0.3);
-        bool trigger_ratio    = guard_applicable && (path_len > 2.5 * direct_dist);
-        bool trigger_reversal = guard_applicable && has_reversal;
-
-        if (trigger_ratio || trigger_reversal) {
-            Warn("A* guard triggered (ratio=%.2f reversal=%d) — using direct path\n",
-                 direct_dist > 1e-6 ? path_len / direct_dist : 0.0,
-                 has_reversal ? 1 : 0);
-            Eigen::Vector3d start_pt = full_path.front();
-            Eigen::Vector3d goal_pt  = full_path.back();
-            full_path.clear();
-            full_path.push_back(start_pt);
-            full_path.push_back(goal_pt);
-        }
+             direct_dist > 1e-6 ? path_len / direct_dist : 0.0);
     }
 
     // Limit path waypoints to avoid exceeding MAX_WAYPOINTS
