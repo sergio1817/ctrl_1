@@ -153,9 +153,9 @@ ctrl1::ctrl1(TargetController *controller)
     GroupBox *ydkbox = new GroupBox(trackbox->LastRowLastCol(), "yd");
     GroupBox *zdkbox = new GroupBox(trackbox->LastRowLastCol(), "zd");
     
-    xd = new DoubleSpinBox(regbox->NewRow(), "x", " m", -2, 2, 0.1, 2);
-    yd = new DoubleSpinBox(regbox->LastRowLastCol(), "y", " m", -2, 2, 0.1, 2);
-    zd = new DoubleSpinBox(regbox->LastRowLastCol(), "z", " m", -2, 2, 0.1, 2);
+    xd = new DoubleSpinBox(regbox->NewRow(), "x", " m", -4, 4, 0.1, 2);
+    yd = new DoubleSpinBox(regbox->LastRowLastCol(), "y", " m", -4, 4, 0.1, 2);
+    zd = new DoubleSpinBox(regbox->LastRowLastCol(), "z", " m", -4, 0, 0.1, 2);
     
     lx = new Label(xdkbox->NewRow(), "funcion");
     lx->SetText("a*fnc(w*t) + b");
