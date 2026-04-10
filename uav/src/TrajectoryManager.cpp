@@ -107,6 +107,9 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       emergency_distance_(0.3),
       replan_distance_(0.8),
       last_safety_replan_time_(0.0),
+      contingency_active_(false),
+      contingency_start_time_(0.0),
+      contingency_duration_(0.0),
       last_update_time_(0.0)
 {
     // --------------------------------------------------------
@@ -388,15 +391,44 @@ void TrajectoryManager::Update(Time time,
             obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
             double obs_dist = GetObstacleDistance(current_uav_pos_);
 
-            if (obs_dist < emergency_distance_) {
+            // If contingency is active, check if it has completed or obstacle cleared
+            if (contingency_active_) {
+                double contingency_elapsed = t_sec - contingency_start_time_;
+                if (contingency_elapsed >= contingency_duration_) {
+                    // Contingency trajectory completed → transition to HOLDING
+                    contingency_active_ = false;
+                    if (obs_dist >= emergency_distance_) {
+                        // Obstacle cleared — allow normal replanning
+                        status_label_->SetText("HOVER (post-contingency)");
+                        Info("safety monitor: contingency completed, obstacle cleared (%.2fm)\n", obs_dist);
+                    } else {
+                        // Still too close — hold position, do NOT regenerate
+                        state_ = State::HOLDING;
+                        last_pos_ = Vector3Df(
+                            static_cast<float>(current_uav_pos_.y()),
+                            static_cast<float>(current_uav_pos_.x()),
+                            static_cast<float>(current_uav_pos_.z()));
+                        status_label_->SetText("HOLDING (obstacle)");
+                        Warn("safety monitor: contingency done but obstacle still at %.2fm, holding\n", obs_dist);
+                    }
+                }
+                // While contingency is active, do NOT re-trigger — let it execute
+            } else if (obs_dist < emergency_distance_) {
+                // First trigger: generate contingency and activate it ONCE
+                GenerateContingencyTrajectory(current_uav_pos_, current_uav_vel_, current_uav_acc_);
                 if (contingency_valid_) {
-                    GenerateContingencyTrajectory(current_uav_pos_, current_uav_vel_, current_uav_acc_);
                     gcopter_traj_ = contingency_traj_;
                     gcopter_traj_valid_ = true;
                     total_duration_ = contingency_traj_.getTotalDuration();
                     trajectory_valid_ = true;
                     num_segments_ = contingency_traj_.getPieceNum();
-                    execution_time_set_ = false;
+                    // Reset execution timing so the new trajectory starts from t=0
+                    execution_start_time_ = t_sec;
+                    execution_time_set_ = true;
+                    // Mark contingency as active to prevent re-triggering
+                    contingency_active_ = true;
+                    contingency_start_time_ = t_sec;
+                    contingency_duration_ = contingency_traj_.getTotalDuration();
                     status_label_->SetText("EMERGENCY STOP");
                     Warn("safety monitor: obstacle at %.2fm < emergency %.2fm, contingency activated\n",
                          obs_dist, emergency_distance_);
@@ -487,6 +519,7 @@ void TrajectoryManager::StartTraj() {
     if (state_ == State::PLANNED && trajectory_valid_) {
         state_ = State::EXECUTING;
         last_replan_time_ = 0.0;
+        contingency_active_ = false;
         status_label_->SetText("EXECUTING");
         Info("trajectory execution started\n");
     }
@@ -495,6 +528,7 @@ void TrajectoryManager::StartTraj() {
 void TrajectoryManager::StopTraj() {
     state_ = State::IDLE;
     execution_time_set_ = false;
+    contingency_active_ = false;
     status_label_->SetText("IDLE (stopped)");
     Info("trajectory stopped\n");
 }
@@ -686,6 +720,7 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
     if (ok) {
         state_ = State::EXECUTING;
         execution_time_set_ = false;  // reset so blend timing works
+        contingency_active_ = false;  // successful replan clears contingency
         status_label_->SetText("EXECUTING (replanned)");
     } else {
         // Use contingency trajectory if available
@@ -697,6 +732,7 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
             num_segments_ = contingency_traj_.getPieceNum();
             state_ = State::EXECUTING;
             execution_time_set_ = false;
+            contingency_active_ = false;  // replan's contingency fallback does not loop
             status_label_->SetText("EXECUTING (contingency)");
             Warn("replanning failed, using contingency decel-to-hover\n");
             ok = true;
@@ -3220,7 +3256,9 @@ double TrajectoryManager::GetObstacleDistance(const Eigen::Vector3d &world_pos) 
     if (distance_field_.empty()) return std::numeric_limits<double>::max();
 
     Eigen::Vector3i gi = WorldToGrid(world_pos);
-    if (!GridInBounds(gi.x(), gi.y(), gi.z())) return 0.0;
+    // Out-of-bounds means no obstacle information — assume safe (max distance)
+    // Previously returned 0.0 which falsely triggered emergency contingency
+    if (!GridInBounds(gi.x(), gi.y(), gi.z())) return std::numeric_limits<double>::max();
 
     int idx = gi.x() * grid_ny_ * grid_nz_ + gi.y() * grid_nz_ + gi.z();
     return static_cast<double>(distance_field_[idx]);

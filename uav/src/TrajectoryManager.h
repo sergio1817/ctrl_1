@@ -317,6 +317,9 @@ private:
     double emergency_distance_;
     double replan_distance_;
     double last_safety_replan_time_;
+    bool   contingency_active_;          ///< true while executing a contingency (prevents re-triggering)
+    double contingency_start_time_;      ///< when contingency was activated (seconds)
+    double contingency_duration_;        ///< expected duration of the contingency trajectory
 
     // --- Adaptive prediction horizon ---
     double last_update_time_;
