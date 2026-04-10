@@ -402,14 +402,21 @@ void TrajectoryManager::Update(Time time,
                         status_label_->SetText("HOVER (post-contingency)");
                         Info("safety monitor: contingency completed, obstacle cleared (%.2fm)\n", obs_dist);
                     } else {
-                        // Still too close — hold position, do NOT regenerate
-                        state_ = State::HOLDING;
-                        last_pos_ = Vector3Df(
-                            static_cast<float>(current_uav_pos_.y()),
-                            static_cast<float>(current_uav_pos_.x()),
-                            static_cast<float>(current_uav_pos_.z()));
-                        status_label_->SetText("HOLDING (obstacle)");
-                        Warn("safety monitor: contingency done but obstacle still at %.2fm, holding\n", obs_dist);
+                        // Still too close — try to replan around the obstacle first
+                        Warn("safety monitor: contingency done but obstacle still at %.2fm, attempting replan\n", obs_dist);
+                        Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
+                                            static_cast<float>(current_uav_pos_.x()),
+                                            static_cast<float>(current_uav_pos_.z()));
+                        Vector3Df cur_vel_w(static_cast<float>(current_uav_vel_.y()),
+                                            static_cast<float>(current_uav_vel_.x()),
+                                            static_cast<float>(current_uav_vel_.z()));
+                        if (!Replan(cur_pos_w, cur_vel_w)) {
+                            // Replan failed — hold position as last resort
+                            state_ = State::HOLDING;
+                            last_pos_ = cur_pos_w;
+                            status_label_->SetText("HOLDING (obstacle)");
+                            Warn("safety monitor: replan failed, holding position\n");
+                        }
                     }
                 }
                 // While contingency is active, do NOT re-trigger — let it execute
@@ -1392,6 +1399,114 @@ bool TrajectoryManager::SolveGCOPTER() {
     }
 
     Info("MINCO: %d pieces, %.2f s total\n", N, total_duration_);
+    return true;
+}
+
+// ################################################################
+// GCOPTER Polytope-Constrained Solver (L-BFGS with safe corridors)
+// ################################################################
+bool TrajectoryManager::SolveGCOPTERConstrained(
+    const std::vector<Eigen::MatrixX4d> &hPolytopes) {
+
+    if (hPolytopes.empty() || num_waypoints_ < 2) return false;
+
+    double v_max = max_vel_->Value();
+    if (v_max < 0.1) v_max = 0.1;
+    double a_max = max_acc_->Value();
+    if (a_max < 0.1) a_max = 0.1;
+
+    // Boundary conditions
+    Eigen::Matrix3d headPVA, tailPVA;
+    headPVA.col(0) = waypoints_[0];
+    headPVA.col(1) = start_vel_;
+    headPVA.col(2) = Eigen::Vector3d::Zero();
+    tailPVA.col(0) = waypoints_[num_waypoints_ - 1];
+    tailPVA.col(1) = end_vel_;
+    tailPVA.col(2) = Eigen::Vector3d::Zero();
+
+    // Parameters for GCOPTER_PolytopeSFC
+    double timeWeight = 500.0;       // rho: penalty on total time
+    double lengthPerPiece = 2.0;     // meters per MINCO piece
+    double smoothingFactor = 0.01;
+    int integralResolution = 8;
+
+    // Magnitude bounds: [v_max, omega_max, theta_max, thrust_min, thrust_max]
+    double mass = 1.0;   // kg (nominal quadrotor mass)
+    double grav = 9.81;
+    double thrust_min = mass * grav * 0.2;
+    double thrust_max = mass * grav * 1.8;
+    Eigen::VectorXd magnitudeBounds(5);
+    magnitudeBounds << v_max,           // max velocity (m/s)
+                       a_max / grav,    // max body rate ~ a_max/g (rad/s, conservative)
+                       M_PI / 4.0,      // max tilt angle (45 deg)
+                       thrust_min,      // min thrust (N)
+                       thrust_max;      // max thrust (N)
+
+    // Penalty weights: [position/corridor, velocity, body_rate, tilt_angle, thrust]
+    Eigen::VectorXd penaltyWeights(5);
+    penaltyWeights << 10000.0,   // corridor (position) penalty — high to enforce obstacle avoidance
+                      1000.0,    // velocity penalty
+                      100.0,     // body rate penalty
+                      100.0,     // tilt angle penalty
+                      10.0;      // thrust penalty
+
+    // Physical params: [mass, grav, drag_coeff_x, drag_coeff_y, drag_coeff_z, yaw_dot]
+    Eigen::VectorXd physicalParams(6);
+    physicalParams << mass, grav, 0.0, 0.0, 0.0, 0.0;
+
+    gcopter::GCOPTER_PolytopeSFC solver;
+    if (!solver.setup(timeWeight, headPVA, tailPVA, hPolytopes,
+                      lengthPerPiece, smoothingFactor, integralResolution,
+                      magnitudeBounds, penaltyWeights, physicalParams)) {
+        Warn("GCOPTER constrained: setup failed\n");
+        return false;
+    }
+
+    Trajectory<5> traj;
+    double cost = solver.optimize(traj, 1.0e-4);
+
+    if (std::isinf(cost) || std::isnan(cost) || traj.getPieceNum() < 1) {
+        Warn("GCOPTER constrained: optimization failed (cost=%.4f, pieces=%d)\n",
+             cost, traj.getPieceNum());
+        return false;
+    }
+
+    // Store result
+    gcopter_traj_ = traj;
+    gcopter_traj_valid_ = true;
+    total_duration_ = traj.getTotalDuration();
+    int N = traj.getPieceNum();
+    num_segments_ = std::min(N, MAX_SEGMENTS);
+
+    if (num_waypoints_ > 0) {
+        last_pos_ = Vector3Df(static_cast<float>(waypoints_[0].y()),
+                              static_cast<float>(waypoints_[0].x()),
+                              static_cast<float>(waypoints_[0].z()));
+    }
+
+    for (int i = 0; i < num_segments_; ++i) {
+        segments_[i].duration = traj[i].getDuration();
+        segments_[i].coeffs.setZero();
+        Eigen::Matrix<double, 3, 6> cm = traj[i].getCoeffMat();
+        for (int axis = 0; axis < 3; ++axis) {
+            for (int c = 0; c <= 5; ++c) {
+                segments_[i].coeffs(axis, c) = cm(axis, 5 - c);
+            }
+        }
+    }
+
+    trajectory_valid_ = true;
+
+    if (warm_start_enabled_) {
+        prev_trajectory_times_.resize(N);
+        for (int i = 0; i < N; ++i) {
+            prev_trajectory_times_(i) = traj[i].getDuration();
+        }
+        prev_coeffs_valid_ = true;
+    }
+
+    Info("GCOPTER constrained: %d pieces, %.2f s total (cost=%.2f)\n",
+         N, total_duration_, cost);
     return true;
 }
 
@@ -2593,11 +2708,26 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
     std::vector<Corridor> corridors;
     bool corridors_ok = GenerateCorridors(full_path, hPolytopes, corridors);
 
-    // GCOPTER mode: use FIRI polytope corridors + MINCO solver
-    if (use_gcopter_) {
+    // GCOPTER mode: use FIRI polytope corridors + constrained MINCO solver
+    if (use_gcopter_ && corridors_ok && !hPolytopes.empty()) {
+        bool ok = SolveGCOPTERConstrained(hPolytopes);
+        if (ok) {
+            Info("obstacle avoidance: using GCOPTER constrained solver with %d polytopes\n",
+                 static_cast<int>(hPolytopes.size()));
+            return true;
+        }
+        Warn("GCOPTER constrained failed, trying unconstrained GCOPTER\n");
+        // Fallback: unconstrained GCOPTER (may violate corridors)
+        bool ok2 = SolveGCOPTER();
+        if (ok2) {
+            Warn("using unconstrained GCOPTER — trajectory may pass near obstacles\n");
+            return true;
+        }
+        Warn("GCOPTER with obstacles failed, falling back to corridor min-snap\n");
+    } else if (use_gcopter_) {
         bool ok = SolveGCOPTER();
         if (ok) return true;
-        Warn("GCOPTER with obstacles failed, falling back to corridor min-snap\n");
+        Warn("GCOPTER failed, falling back to corridor min-snap\n");
     }
 
     // Step 3: Build SFC corridors around path (AABB from GenerateCorridors)

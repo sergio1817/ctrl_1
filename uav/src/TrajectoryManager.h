@@ -237,6 +237,7 @@ private:
 
     // GCOPTER/MINCO backend
     bool SolveGCOPTER();
+    bool SolveGCOPTERConstrained(const std::vector<Eigen::MatrixX4d> &hPolytopes);
     std::vector<Eigen::Vector3d> GetNearbyObstaclePoints(
         const Eigen::Vector3d &seg_start,
         const Eigen::Vector3d &seg_end,
