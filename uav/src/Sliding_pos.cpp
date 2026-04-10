@@ -439,7 +439,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         data->GetDataTime(now, dt1);
         delta_t = T->Value();
     }
-    Printf("delta_t: %f\n",delta_t);
+    //Printf("delta_t: %f\n",delta_t);
     
     if (first_update) {
         delta_t = 0.0F;
