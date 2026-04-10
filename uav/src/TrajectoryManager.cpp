@@ -2367,8 +2367,14 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
              direct_dist > 1e-6 ? path_len / direct_dist : 0.0,
              has_reversal ? 1 : 0, reversal_idx);
 
-        bool trigger_ratio    = (direct_dist > 0.3) && (path_len > 2.5 * direct_dist);
-        bool trigger_reversal = has_reversal;
+        // Guard only makes sense when start and goal are far apart.
+        // For loop trajectories (WP_last ≈ WP_first, direct_dist ≈ 0) reverting to
+        // [start, goal] produces a degenerate zero-displacement MINCO trajectory.
+        // In that case skip the guard entirely: the full A* path is kept and
+        // MINCO's reversal-split provides through-velocity at the junction.
+        bool guard_applicable = (direct_dist > 0.3);
+        bool trigger_ratio    = guard_applicable && (path_len > 2.5 * direct_dist);
+        bool trigger_reversal = guard_applicable && has_reversal;
 
         if (trigger_ratio || trigger_reversal) {
             Warn("A* guard triggered (ratio=%.2f reversal=%d) — using direct path\n",
