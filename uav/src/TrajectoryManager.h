@@ -148,9 +148,39 @@ private:
     bool use_gcopter_traj_;        // true when GCOPTER produced the trajectory
     bool gcopter_traj_valid_;     // true when gcopter_traj_ has valid data
 
+    // --- SOTA Upgrade 2: Gradient-based time allocation ---
+    bool time_opt_enabled_;
+    double kT_;                  // time penalty weight
+
+    // --- SOTA Upgrade 3: TOPP-RA post-processing (Pham & Pham 2018) ---
+    bool topp_ra_enabled_;
+
+    // TOPP-RA pre-allocated arrays (50 grid points per segment, max 20 segments = 1000+1)
+    static const int TOPPRA_SAMPLES_PER_SEG = 50;
+    static const int TOPPRA_MAX_GRID = MAX_SEGMENTS * TOPPRA_SAMPLES_PER_SEG + 1;
+    double toppra_s_[TOPPRA_MAX_GRID];           // path parameter grid
+    double toppra_ds_[TOPPRA_MAX_GRID];          // delta-s per interval
+    double toppra_x_max_vel_[TOPPRA_MAX_GRID];   // velocity-limited x = sdot^2
+    double toppra_K_lo_[TOPPRA_MAX_GRID];        // controllable set lower bound
+    double toppra_K_hi_[TOPPRA_MAX_GRID];        // controllable set upper bound
+    double toppra_x_[TOPPRA_MAX_GRID];           // forward pass optimal x = sdot^2
+    double toppra_u_[TOPPRA_MAX_GRID];           // forward pass optimal u = sddot
+    double toppra_p_prime_[TOPPRA_MAX_GRID][3];  // p'(s) tangent
+    double toppra_p_dprime_[TOPPRA_MAX_GRID][3]; // p''(s) curvature
+
+    // --- SOTA Upgrade 5: Receding-horizon replanning ---
+    double replan_horizon_;
+    double blend_duration_;
+    Trajectory<5> contingency_traj_;     // decelerate-to-hover backup
+    bool contingency_valid_;
+    Trajectory<5> prev_traj_;            // previous trajectory for blending
+    bool prev_traj_valid_;
+    double prev_traj_start_time_;
+
     // Current UAV state (updated each tick from ctrl1)
     Eigen::Vector3d current_uav_pos_;
     Eigen::Vector3d current_uav_vel_;
+    Eigen::Vector3d current_uav_acc_;
 
     // Timing
     double execution_start_time_;
@@ -212,6 +242,25 @@ private:
         const Eigen::Vector3d &seg_end,
         double radius) const;
 
+    // --- SOTA Upgrade 2: Gradient-based time allocation (Richter et al. 2016) ---
+    bool OptimizeTimeAllocation(Eigen::VectorXd &ts,
+                                const Eigen::Matrix3Xd &inPs,
+                                const Eigen::Matrix3d &headPVA,
+                                const Eigen::Matrix3d &tailPVA);
+
+    // --- SOTA Upgrade 3: TOPP-RA post-processing ---
+    bool ApplyTOPPRA();
+
+    // --- SOTA Upgrade 4: FIRI corridor generation ---
+    bool GenerateCorridors(const std::vector<Eigen::Vector3d> &waypoints,
+                           std::vector<Eigen::MatrixX4d> &hPolytopes,
+                           std::vector<Corridor> &aabb_corridors);
+
+    // --- SOTA Upgrade 5: Receding-horizon replanning ---
+    void GenerateContingencyTrajectory(const Eigen::Vector3d &pos,
+                                       const Eigen::Vector3d &vel,
+                                       const Eigen::Vector3d &acc);
+
     // -------------------------------------------------------
     // Obstacle avoidance pipeline
     // -------------------------------------------------------
@@ -228,11 +277,85 @@ private:
     double grid_res_;
     Eigen::Vector3d grid_origin_;
 
+    // --- SOTA: Incremental occupancy grid ---
+    bool grid_dirty_;
+    bool grid_initialized_;
+    Eigen::Vector3d prev_obstacle_pos_[MAX_OBSTACLES];
+    int prev_num_obstacles_;
+    struct InflationOffset { int dx; int dy; };
+    std::vector<InflationOffset> inflation_template_;
+    double inflation_template_radius_;
+
+    // --- SOTA: Pipeline caching ---
+    bool cache_valid_;
+
+    // --- SOTA: MINCO warm start ---
+    bool warm_start_enabled_;
+    Eigen::VectorXd prev_trajectory_times_;
+    bool prev_coeffs_valid_;
+
+    // --- SOTA: Distance field ---
+    bool distance_field_valid_;
+
+    // --- ESDF-Lite distance field ---
+    std::vector<float> distance_field_;
+    void ComputeDistanceField();
+    double GetObstacleDistance(const Eigen::Vector3d &world_pos) const;
+
+    // --- Real-time safety monitor ---
+    bool safety_monitor_enabled_;
+    double emergency_distance_;
+    double replan_distance_;
+    double last_safety_replan_time_;
+
+    // --- Adaptive prediction horizon ---
+    double last_update_time_;
+
     std::vector<float> astar_gcost_;
     std::vector<int>   astar_parent_;
     std::vector<int8_t> jps_dir_x_;   ///< JPS arrival direction per cell
     std::vector<int8_t> jps_dir_y_;
     std::vector<int8_t> jps_dir_z_;
+
+    // --- SOTA: Bucket queue for JPS/A* (O(1) push/pop) ---
+    struct BucketQueue {
+        std::vector<std::vector<int>> buckets;
+        int min_bucket;
+        int num_buckets;
+        double inv_resolution;
+
+        void init(int max_buckets, double bucket_res) {
+            num_buckets = max_buckets;
+            inv_resolution = 1.0 / bucket_res;
+            buckets.resize(max_buckets);
+            min_bucket = 0;
+        }
+        void clear() {
+            for (int i = 0; i < num_buckets; ++i) buckets[i].clear();
+            min_bucket = 0;
+        }
+        void push(int node, double cost) {
+            int b = static_cast<int>(cost * inv_resolution);
+            if (b < 0) b = 0;
+            if (b >= num_buckets) b = num_buckets - 1;
+            buckets[b].push_back(node);
+            if (b < min_bucket) min_bucket = b;
+        }
+        bool empty() const {
+            for (int b = min_bucket; b < num_buckets; ++b)
+                if (!buckets[b].empty()) return false;
+            return true;
+        }
+        int pop() {
+            while (min_bucket < num_buckets && buckets[min_bucket].empty())
+                ++min_bucket;
+            if (min_bucket >= num_buckets) return -1;
+            int node = buckets[min_bucket].back();
+            buckets[min_bucket].pop_back();
+            return node;
+        }
+    };
+    BucketQueue bucket_queue_;
 
     // -------------------------------------------------------
     // JPS 3D neighbor pruning tables
@@ -280,6 +403,9 @@ private:
     bool IsSegmentFree(const Eigen::Vector3d &a, const Eigen::Vector3d &b) const;
 
     void BuildOccupancyGrid();
+    void BuildOccupancyGridIncremental();
+    void PrecomputeInflationTemplate(double radius);
+    bool ObstaclesMoved() const;
 
     bool FindPath(const Eigen::Vector3d &start, const Eigen::Vector3d &goal,
                   std::vector<Eigen::Vector3d> &path);

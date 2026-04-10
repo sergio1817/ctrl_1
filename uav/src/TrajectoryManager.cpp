@@ -71,11 +71,20 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       num_segments_(0),
       total_duration_(0.0),
       trajectory_valid_(false),
-      use_gcopter_(false),
+      use_gcopter_(true),
       use_gcopter_traj_(false),
       gcopter_traj_valid_(false),
+      time_opt_enabled_(true),
+      kT_(500.0),
+      topp_ra_enabled_(true),
+      replan_horizon_(3.0),
+      blend_duration_(0.5),
+      contingency_valid_(false),
+      prev_traj_valid_(false),
+      prev_traj_start_time_(0.0),
       current_uav_pos_(Eigen::Vector3d::Zero()),
       current_uav_vel_(Eigen::Vector3d::Zero()),
+      current_uav_acc_(Eigen::Vector3d::Zero()),
       execution_start_time_(0.0),
       execution_time_set_(false),
       last_replan_time_(0.0),
@@ -85,7 +94,20 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       num_obstacles_(0),
       grid_nx_(0), grid_ny_(0), grid_nz_(0),
       grid_res_(0.1),
-      grid_origin_(WS_X_MIN, WS_Y_MIN, WS_Z_MIN)
+      grid_origin_(WS_X_MIN, WS_Y_MIN, WS_Z_MIN),
+      grid_dirty_(true),
+      grid_initialized_(false),
+      prev_num_obstacles_(0),
+      inflation_template_radius_(0.0),
+      cache_valid_(false),
+      warm_start_enabled_(true),
+      prev_coeffs_valid_(false),
+      distance_field_valid_(false),
+      safety_monitor_enabled_(true),
+      emergency_distance_(0.3),
+      replan_distance_(0.8),
+      last_safety_replan_time_(0.0),
+      last_update_time_(0.0)
 {
     // --------------------------------------------------------
     // Output matrix with named elements (13 elements)
@@ -240,6 +262,17 @@ void TrajectoryManager::Update(Time time,
     // Swap x and y to match planner's internal frame
     current_uav_pos_ = Eigen::Vector3d(uav_pos.y, uav_pos.x, uav_pos.z);
     current_uav_vel_ = Eigen::Vector3d(uav_vel.y, uav_vel.x, uav_vel.z);
+    // Estimate acceleration from trajectory if executing
+    if (state_ == State::EXECUTING && trajectory_valid_ && execution_time_set_) {
+        double t_now = static_cast<double>(time) / 1e9 - execution_start_time_;
+        if (t_now >= 0.0 && t_now <= total_duration_) {
+            if (use_gcopter_ && gcopter_traj_valid_) {
+                current_uav_acc_ = gcopter_traj_.getAcc(t_now);
+            } else {
+                current_uav_acc_ = EvalAcc(t_now);
+            }
+        }
+    }
 
     // Check GUI buttons
     if (plan_button_->Clicked()) {
@@ -255,6 +288,7 @@ void TrajectoryManager::Update(Time time,
 
     // Convert Flair time to seconds
     double t_sec = static_cast<double>(time) / 1e9;
+    last_update_time_ = t_sec;
 
     if (state_ == State::EXECUTING && trajectory_valid_) {
         // Set execution start time on the first real tick after Execute is clicked.
@@ -347,6 +381,40 @@ void TrajectoryManager::Update(Time time,
         double rp = replan_period_->Value();
         if (rp > 0.0 && (t_traj - last_replan_time_) >= rp) {
             last_replan_time_ = t_traj;
+        }
+
+        // --- SOTA: Real-time safety monitor ---
+        if (safety_monitor_enabled_ && !distance_field_.empty() &&
+            obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
+            double obs_dist = GetObstacleDistance(current_uav_pos_);
+
+            if (obs_dist < emergency_distance_) {
+                if (contingency_valid_) {
+                    GenerateContingencyTrajectory(current_uav_pos_, current_uav_vel_, current_uav_acc_);
+                    gcopter_traj_ = contingency_traj_;
+                    gcopter_traj_valid_ = true;
+                    total_duration_ = contingency_traj_.getTotalDuration();
+                    trajectory_valid_ = true;
+                    num_segments_ = contingency_traj_.getPieceNum();
+                    execution_time_set_ = false;
+                    status_label_->SetText("EMERGENCY STOP");
+                    Warn("safety monitor: obstacle at %.2fm < emergency %.2fm, contingency activated\n",
+                         obs_dist, emergency_distance_);
+                }
+            } else if (obs_dist < replan_distance_) {
+                if ((t_sec - last_safety_replan_time_) > 1.0) {
+                    last_safety_replan_time_ = t_sec;
+                    Warn("safety monitor: obstacle at %.2fm < replan threshold %.2fm, replanning\n",
+                         obs_dist, replan_distance_);
+                    Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
+                                        static_cast<float>(current_uav_pos_.x()),
+                                        static_cast<float>(current_uav_pos_.z()));
+                    Vector3Df cur_vel_w(static_cast<float>(current_uav_vel_.y()),
+                                        static_cast<float>(current_uav_vel_.x()),
+                                        static_cast<float>(current_uav_vel_.z()));
+                    Replan(cur_pos_w, cur_vel_w);
+                }
+            }
         }
     } else if (state_ == State::HOLDING) {
         // Holding final position — output last_pos_ with zero derivatives
@@ -494,9 +562,9 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
 
     InitGrid(res);
 
-    // Select planner backend
+    // Select planner backend — MINCO/GCOPTER is now default (SOTA Upgrade 1)
     int backend_idx = planner_backend_->CurrentIndex();
-    use_gcopter_ = (backend_idx == 1);
+    use_gcopter_ = (backend_idx == 1) || (backend_idx == 0 && use_gcopter_);
     gcopter_traj_valid_ = false;
 
     // Use full obstacle avoidance pipeline if enabled and obstacles present
@@ -512,6 +580,13 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
         }
     } else {
         ok = SolveMinSnap();
+    }
+
+    // SOTA Upgrade 3: TOPP-RA post-processing for dynamic feasibility
+    if (ok && topp_ra_enabled_) {
+        if (!ApplyTOPPRA()) {
+            Warn("TOPP-RA post-processing failed, keeping original trajectory\n");
+        }
     }
 
     if (ok) {
@@ -532,9 +607,52 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
     state_ = State::REPLANNING;
     status_label_->SetText("REPLANNING...");
 
-    // Update first waypoint to current position
-    waypoints_[0] = Eigen::Vector3d(current_pos.x, current_pos.y, current_pos.z);
-    start_vel_ = Eigen::Vector3d(current_vel.x, current_vel.y, current_vel.z);
+    // --- SOTA Upgrade 5: Receding-horizon replanning with warm start ---
+
+    // Save previous trajectory for blending
+    if (gcopter_traj_valid_ && use_gcopter_) {
+        prev_traj_ = gcopter_traj_;
+        prev_traj_valid_ = true;
+        prev_traj_start_time_ = execution_start_time_;
+    }
+
+    // Step 1: Extract current state in planner frame
+    Eigen::Vector3d cur_pos_plan(current_pos.y, current_pos.x, current_pos.z);
+    Eigen::Vector3d cur_vel_plan(current_vel.y, current_vel.x, current_vel.z);
+    Eigen::Vector3d cur_acc_plan = Eigen::Vector3d::Zero();
+
+    // If we have a valid executing trajectory, extract accurate acc from it
+    if (trajectory_valid_ && gcopter_traj_valid_ && execution_time_set_) {
+        cur_pos_plan = current_uav_pos_;
+        cur_vel_plan = current_uav_vel_;
+        cur_acc_plan = current_uav_acc_;
+    }
+
+    // Step 2: Only replan from current position to goal
+    Eigen::Vector3d goal = waypoints_[num_waypoints_ - 1];
+    waypoints_[0] = cur_pos_plan;
+    start_vel_ = cur_vel_plan;
+
+    // If we had intermediate waypoints, keep only those that are still ahead
+    if (num_waypoints_ > 2 && trajectory_valid_) {
+        std::vector<Eigen::Vector3d> remaining_wps;
+        remaining_wps.push_back(cur_pos_plan);
+
+        for (int i = 1; i < num_waypoints_; ++i) {
+            double d = (waypoints_[i] - cur_pos_plan).norm();
+            if (d > 0.1) {
+                remaining_wps.push_back(waypoints_[i]);
+            }
+        }
+        if ((remaining_wps.back() - goal).norm() > 1e-6) {
+            remaining_wps.push_back(goal);
+        }
+
+        num_waypoints_ = std::min(static_cast<int>(remaining_wps.size()), MAX_WAYPOINTS);
+        for (int i = 0; i < num_waypoints_; ++i) {
+            waypoints_[i] = remaining_wps[i];
+        }
+    }
 
     // Update obstacle radius from GUI
     double obs_r = obstacle_radius_spin_->Value();
@@ -543,6 +661,9 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
     }
 
     gcopter_traj_valid_ = false;
+
+    // Step 3: Generate contingency trajectory (decelerate to hover)
+    GenerateContingencyTrajectory(cur_pos_plan, cur_vel_plan, cur_acc_plan);
 
     bool ok;
     if (obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
@@ -557,12 +678,32 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
         ok = SolveMinSnap();
     }
 
+    // TOPP-RA post-processing
+    if (ok && topp_ra_enabled_) {
+        ApplyTOPPRA();
+    }
+
     if (ok) {
         state_ = State::EXECUTING;
+        execution_time_set_ = false;  // reset so blend timing works
         status_label_->SetText("EXECUTING (replanned)");
     } else {
-        state_ = prev;
-        Warn("replanning failed, continuing with old trajectory\n");
+        // Use contingency trajectory if available
+        if (contingency_valid_) {
+            gcopter_traj_ = contingency_traj_;
+            gcopter_traj_valid_ = true;
+            total_duration_ = contingency_traj_.getTotalDuration();
+            trajectory_valid_ = true;
+            num_segments_ = contingency_traj_.getPieceNum();
+            state_ = State::EXECUTING;
+            execution_time_set_ = false;
+            status_label_->SetText("EXECUTING (contingency)");
+            Warn("replanning failed, using contingency decel-to-hover\n");
+            ok = true;
+        } else {
+            state_ = prev;
+            Warn("replanning failed, continuing with old trajectory\n");
+        }
     }
     return ok;
 }
@@ -632,7 +773,7 @@ bool TrajectoryManager::SolveMinSnap() {
     total_duration_ = 0.0;
     for (int i = 0; i < M; ++i) {
         double dist = (waypoints_[i + 1] - waypoints_[i]).norm();
-        double t_seg = dist / v_max;
+        double t_seg = dist / v_max * 1.5;  // alpha=1.5 time buffer for polynomial headroom
         if (t_seg < 0.5) t_seg = 0.5;  // minimum segment time
         durations[i] = t_seg;
         total_duration_ += t_seg;
@@ -981,7 +1122,11 @@ bool TrajectoryManager::SolveGCOPTER() {
     if (grid_data_.empty() || grid_nx_ == 0) {
         double res = grid_res_spin_->Value();
         InitGrid(res);
-        BuildOccupancyGrid();
+        BuildOccupancyGridIncremental();
+        if (!distance_field_valid_) {
+            ComputeDistanceField();
+            distance_field_valid_ = true;
+        }
     }
 
     // Step 1: For each path segment, run FIRI to build polytope corridors
@@ -1200,6 +1345,16 @@ bool TrajectoryManager::SolveGCOPTER() {
     }
 
     trajectory_valid_ = true;
+
+    // SOTA: Store segment times for warm start on next replan
+    if (warm_start_enabled_) {
+        prev_trajectory_times_.resize(N);
+        for (int i = 0; i < N; ++i) {
+            prev_trajectory_times_(i) = traj[i].getDuration();
+        }
+        prev_coeffs_valid_ = true;
+    }
+
     Info("MINCO: %d pieces, %.2f s total\n", N, total_duration_);
     return true;
 }
@@ -1227,6 +1382,10 @@ void TrajectoryManager::InitGrid(double res) {
     jps_dir_x_.resize(total, 0);
     jps_dir_y_.resize(total, 0);
     jps_dir_z_.resize(total, 0);
+    grid_dirty_ = true;
+    grid_initialized_ = false;
+    distance_field_valid_ = false;
+    cache_valid_ = false;
 }
 
 void TrajectoryManager::ClearGrid() {
@@ -1419,7 +1578,13 @@ void TrajectoryManager::BuildOccupancyGrid() {
         // using safety_margin as the uncertainty factor
         double obs_speed = obstacles_[i].vel.norm();
         if (obs_speed > 0.01 && total_duration_ > 0.0) {
-            double pred_horizon = total_duration_;
+            // SOTA Upgrade 8: Adaptive prediction horizon
+            double remaining_time = total_duration_;
+            if (execution_time_set_ && last_update_time_ > 0.0) {
+                double elapsed = last_update_time_ - execution_start_time_;
+                remaining_time = std::max(total_duration_ - elapsed, 1.0);
+            }
+            double pred_horizon = std::min(remaining_time, 5.0);  // cap at 5s
             for (int step = 1; step <= 4; ++step) {
                 double t_pred = pred_horizon * step / 4.0;
                 double pred_x = obstacles_[i].pos.x() + obstacles_[i].vel.x() * t_pred;
@@ -1473,13 +1638,7 @@ bool TrajectoryManager::FindPathAStar(const Eigen::Vector3d &start, const Eigen:
     std::fill(astar_gcost_.begin(), astar_gcost_.begin() + N, std::numeric_limits<float>::max());
     std::fill(astar_parent_.begin(), astar_parent_.begin() + N, -2);
 
-    struct PQEntry {
-        float f;
-        int cell;  // flat index
-        bool operator>(const PQEntry &o) const { return f > o.f; }
-    };
-    std::priority_queue<PQEntry, std::vector<PQEntry>, std::greater<PQEntry> > open_q;
-
+    // SOTA: Bucket queue — O(1) push/pop instead of O(log N) priority queue
     // Helpers
     int nyz = grid_ny_ * grid_nz_;
     #define CELL_IDX(ix_, iy_, iz_) ((ix_) * nyz + (iy_) * grid_nz_ + (iz_))
@@ -1492,14 +1651,19 @@ bool TrajectoryManager::FindPathAStar(const Eigen::Vector3d &start, const Eigen:
     };
 
     float res_f = static_cast<float>(grid_res_);
+    double bucket_res = 0.1 * grid_res_;
+    double max_cost_est = eucDist(sx, sy, sz, gx, gy, gz) * res_f * 3.0;
+    int max_buckets = static_cast<int>(max_cost_est / bucket_res) + 1000;
+    if (max_buckets > 100000) max_buckets = 100000;
+    bucket_queue_.init(max_buckets, bucket_res);
+    bucket_queue_.clear();
+
     int start_cell = CELL_IDX(sx, sy, sz);
     int goal_cell = CELL_IDX(gx, gy, gz);
     astar_gcost_[start_cell] = 0.0f;
     astar_parent_[start_cell] = -1;  // -1 = start node
-    PQEntry se;
-    se.f = ASTAR_WEIGHT * eucDist(sx, sy, sz, gx, gy, gz) * res_f;
-    se.cell = start_cell;
-    open_q.push(se);
+    double start_f = ASTAR_WEIGHT * eucDist(sx, sy, sz, gx, gy, gz) * res_f;
+    bucket_queue_.push(start_cell, start_f);
 
     // 26-connectivity
     static const int offsets[26][3] = {
@@ -1523,16 +1687,10 @@ bool TrajectoryManager::FindPathAStar(const Eigen::Vector3d &start, const Eigen:
     int max_iter = static_cast<int>(std::min(N, static_cast<size_t>(800000)));
     int iter = 0;
 
-    while (!open_q.empty() && iter < max_iter) {
+    while (!bucket_queue_.empty() && iter < max_iter) {
         ++iter;
-        PQEntry top = open_q.top();
-        open_q.pop();
-
-        int ci = top.cell;
-        if (top.f > astar_gcost_[ci] + ASTAR_WEIGHT * eucDist(ci / nyz, (ci % nyz) / grid_nz_, ci % grid_nz_,
-                                          gx, gy, gz) * res_f + 0.01f) {
-            continue;  // stale entry
-        }
+        int ci = bucket_queue_.pop();
+        if (ci < 0) break;
 
         if (ci == goal_cell) {
             found = true;
@@ -1570,10 +1728,7 @@ bool TrajectoryManager::FindPathAStar(const Eigen::Vector3d &start, const Eigen:
                 astar_gcost_[nb] = new_g;
                 astar_parent_[nb] = ci;
                 float h = ASTAR_WEIGHT * eucDist(nx_i, ny_i, nz_i, gx, gy, gz) * res_f;
-                PQEntry e;
-                e.f = new_g + h;
-                e.cell = nb;
-                open_q.push(e);
+                bucket_queue_.push(nb, static_cast<double>(new_g + h));
             }
         }
     }
@@ -1806,8 +1961,8 @@ bool TrajectoryManager::HasForcedJPS(int x, int y, int z,
     int num_check;
     switch (norm1) {
         case 1: num_check = 8; break;
-        case 2: num_check = 8; break;
-        case 3: num_check = 6; break;
+        case 2: num_check = 12; break;  // nsz[2][1] = 12 forced neighbors
+        case 3: num_check = 12; break;  // nsz[3][1] = 12 forced neighbors
         default: return false;
     }
     for (int fn = 0; fn < num_check; ++fn) {
@@ -1913,13 +2068,7 @@ bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
     std::fill(jps_dir_y_.begin(), jps_dir_y_.begin() + N, static_cast<int8_t>(0));
     std::fill(jps_dir_z_.begin(), jps_dir_z_.begin() + N, static_cast<int8_t>(0));
 
-    struct PQEntry {
-        float f;
-        int cell;
-        bool operator>(const PQEntry &o) const { return f > o.f; }
-    };
-    std::priority_queue<PQEntry, std::vector<PQEntry>, std::greater<PQEntry> > open_q;
-
+    // SOTA: Bucket queue — O(1) push/pop
     int nyz = grid_ny_ * grid_nz_;
     #define JPS_CELL_IDX(ix_, iy_, iz_) ((ix_) * nyz + (iy_) * grid_nz_ + (iz_))
 
@@ -1931,36 +2080,34 @@ bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
     };
 
     float res_f = static_cast<float>(grid_res_);
+    double bucket_res = 0.1 * grid_res_;
+    double max_cost_est = eucDist(sx, sy, sz, gx, gy, gz) * res_f * 3.0;
+    int max_buckets = static_cast<int>(max_cost_est / bucket_res) + 1000;
+    if (max_buckets > 100000) max_buckets = 100000;
+    bucket_queue_.init(max_buckets, bucket_res);
+    bucket_queue_.clear();
+
     int start_cell = JPS_CELL_IDX(sx, sy, sz);
     int goal_cell = JPS_CELL_IDX(gx, gy, gz);
     astar_gcost_[start_cell] = 0.0f;
     astar_parent_[start_cell] = -1;
-    // Start node: dx=dy=dz=0 means expand all 26 neighbors
     jps_dir_x_[start_cell] = 0; jps_dir_y_[start_cell] = 0; jps_dir_z_[start_cell] = 0;
 
-    PQEntry se;
-    se.f = eucDist(sx, sy, sz, gx, gy, gz) * res_f;
-    se.cell = start_cell;
-    open_q.push(se);
+    bucket_queue_.push(start_cell, static_cast<double>(eucDist(sx, sy, sz, gx, gy, gz) * res_f));
 
     bool found = false;
     int max_iter = static_cast<int>(std::min(N, static_cast<size_t>(800000)));
     int iter = 0;
 
-    while (!open_q.empty() && iter < max_iter) {
+    while (!bucket_queue_.empty() && iter < max_iter) {
         ++iter;
-        PQEntry top = open_q.top();
-        open_q.pop();
+        int ci = bucket_queue_.pop();
+        if (ci < 0) break;
 
-        int ci = top.cell;
         int cx = ci / nyz;
         int cy = (ci % nyz) / grid_nz_;
         int cz = ci % grid_nz_;
         float cur_g = astar_gcost_[ci];
-
-        // Stale entry check
-        if (top.f > cur_g + eucDist(cx, cy, cz, gx, gy, gz) * res_f + 0.01f)
-            continue;
 
         if (ci == goal_cell) {
             found = true;
@@ -1979,18 +2126,16 @@ bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
         for (int dev = 0; dev < num_neib + num_fneib; ++dev) {
             int ddx, ddy, ddz;
             if (dev < num_neib) {
-                // Natural neighbor
                 ddx = jps_neib_.ns[dir_id][0][dev];
                 ddy = jps_neib_.ns[dir_id][1][dev];
                 ddz = jps_neib_.ns[dir_id][2][dev];
             } else {
-                // Forced neighbor: check if the obstacle cell is occupied
                 int fidx = dev - num_neib;
                 int fnx = cx + jps_neib_.f1[dir_id][0][fidx];
                 int fny = cy + jps_neib_.f1[dir_id][1][fidx];
                 int fnz = cz + jps_neib_.f1[dir_id][2][fidx];
                 if (!IsOccupied(fnx, fny, fnz))
-                    continue;  // no forced neighbor here
+                    continue;
                 ddx = jps_neib_.f2[dir_id][0][fidx];
                 ddy = jps_neib_.f2[dir_id][1][fidx];
                 ddz = jps_neib_.f2[dir_id][2][fidx];
@@ -2007,7 +2152,6 @@ bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
             if (new_g < astar_gcost_[nb]) {
                 astar_gcost_[nb] = new_g;
                 astar_parent_[nb] = ci;
-                // Normalize direction to unit steps
                 int ndx = (new_x > cx) ? 1 : ((new_x < cx) ? -1 : 0);
                 int ndy = (new_y > cy) ? 1 : ((new_y < cy) ? -1 : 0);
                 int ndz = (new_z > cz) ? 1 : ((new_z < cz) ? -1 : 0);
@@ -2015,10 +2159,7 @@ bool TrajectoryManager::FindPathJPS(const Eigen::Vector3d &start,
                 jps_dir_y_[nb] = static_cast<int8_t>(ndy);
                 jps_dir_z_[nb] = static_cast<int8_t>(ndz);
                 float h = eucDist(new_x, new_y, new_z, gx, gy, gz) * res_f;
-                PQEntry e;
-                e.f = new_g + h;
-                e.cell = nb;
-                open_q.push(e);
+                bucket_queue_.push(nb, static_cast<double>(new_g + h));
             }
         }
     }
@@ -2285,8 +2426,12 @@ bool TrajectoryManager::SolveMinSnapConstrained(
 // Full obstacle avoidance pipeline
 // ============================================================
 bool TrajectoryManager::PlanWithObstacleAvoidance() {
-    // Step 1: Build occupancy grid
-    BuildOccupancyGrid();
+    // SOTA: Incremental grid + distance field (skip if obstacles haven't moved)
+    BuildOccupancyGridIncremental();
+    if (!distance_field_valid_) {
+        ComputeDistanceField();
+        distance_field_valid_ = true;
+    }
 
     double sm = safety_margin_->Value();
 
@@ -2406,20 +2551,815 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
         waypoints_[i] = full_path[i];
     }
 
-    // GCOPTER mode: use FIRI polytope corridors + GCOPTER optimizer
+    // --- SOTA Upgrade 4: Unified FIRI corridor generation ---
+    typedef std::vector<Eigen::MatrixX4d> PolyhedraH_t;
+    PolyhedraH_t hPolytopes;
+    std::vector<Corridor> corridors;
+    bool corridors_ok = GenerateCorridors(full_path, hPolytopes, corridors);
+
+    // GCOPTER mode: use FIRI polytope corridors + MINCO solver
     if (use_gcopter_) {
         bool ok = SolveGCOPTER();
         if (ok) return true;
         Warn("GCOPTER with obstacles failed, falling back to corridor min-snap\n");
     }
 
-    // Step 3: Build SFC corridors around path
-    std::vector<Corridor> corridors;
-    if (!BuildCorridors(full_path, sm, corridors)) {
-        Warn("corridor building failed, falling back to unconstrained solve\n");
-        return SolveMinSnap();
+    // Step 3: Build SFC corridors around path (AABB from GenerateCorridors)
+    if (!corridors_ok) {
+        if (!BuildCorridors(full_path, sm, corridors)) {
+            Warn("corridor building failed, falling back to unconstrained solve\n");
+            return SolveMinSnap();
+        }
     }
 
     // Step 4: Corridor-constrained min-snap
     return SolveMinSnapConstrained(full_path, corridors);
+}
+
+// ################################################################
+// SOTA Upgrade 2: Gradient-Based Time Allocation (Richter et al. 2016)
+// ################################################################
+bool TrajectoryManager::OptimizeTimeAllocation(
+    Eigen::VectorXd &ts,
+    const Eigen::Matrix3Xd &inPs,
+    const Eigen::Matrix3d &headPVA,
+    const Eigen::Matrix3d &tailPVA) {
+
+    if (!time_opt_enabled_) return false;
+
+    const int M = static_cast<int>(ts.size());
+    if (M < 1) return false;
+
+    const int max_iters = 8;
+    const double conv_threshold = 1e-3;
+    const double min_seg_time = 0.3;
+
+    // Initial solve to get coefficients
+    minco::MINCO_S3NU solver;
+    solver.setConditions(headPVA, tailPVA, M);
+    solver.setParameters(inPs, ts);
+
+    double energy = 0.0;
+    solver.getEnergy(energy);
+    double prev_cost = energy + kT_ * ts.sum();
+    Info("TimeOpt: initial cost=%.4f (kT=%.1f)\n", prev_cost, kT_);
+
+    double step_size = 0.01;
+
+    for (int iter = 0; iter < max_iters; ++iter) {
+        // Analytical gradient from MINCO
+        Eigen::VectorXd energy_grad_T;
+        solver.getEnergyPartialGradByTimes(energy_grad_T);
+
+        // Total gradient: dJ/dTi = dE/dTi + kT
+        Eigen::VectorXd grad(M);
+        for (int i = 0; i < M; ++i) {
+            grad(i) = energy_grad_T(i) + kT_;
+        }
+
+        // Gradient descent step
+        Eigen::VectorXd ts_new = ts - step_size * grad;
+
+        // Enforce minimum segment time
+        for (int i = 0; i < M; ++i) {
+            if (ts_new(i) < min_seg_time) ts_new(i) = min_seg_time;
+        }
+
+        // Re-solve and compute cost
+        solver.setParameters(inPs, ts_new);
+        double new_energy = 0.0;
+        solver.getEnergy(new_energy);
+        double new_cost = new_energy + kT_ * ts_new.sum();
+
+        // Armijo-style backtracking
+        int bt_iters = 0;
+        while (new_cost > prev_cost && bt_iters < 5) {
+            step_size *= 0.5;
+            ts_new = ts - step_size * grad;
+            for (int i = 0; i < M; ++i) {
+                if (ts_new(i) < min_seg_time) ts_new(i) = min_seg_time;
+            }
+            solver.setParameters(inPs, ts_new);
+            solver.getEnergy(new_energy);
+            new_cost = new_energy + kT_ * ts_new.sum();
+            bt_iters++;
+        }
+
+        double rel_change = std::abs(new_cost - prev_cost) / (std::abs(prev_cost) + 1e-10);
+
+        if (new_cost < prev_cost) {
+            ts = ts_new;
+            prev_cost = new_cost;
+            energy = new_energy;
+            step_size *= 1.2;
+            if (step_size > 0.1) step_size = 0.1;
+        } else {
+            solver.setParameters(inPs, ts);
+        }
+
+        if (rel_change < conv_threshold) {
+            Info("TimeOpt: converged at iter %d, cost=%.4f\n", iter, prev_cost);
+            break;
+        }
+    }
+
+    Info("TimeOpt: final cost=%.4f, total_time=%.2f s\n", prev_cost, ts.sum());
+    return true;
+}
+
+// ################################################################
+// SOTA Upgrade 3: TOPP-RA Post-Processing (Pham & Pham, IEEE T-RO 2018)
+// ################################################################
+bool TrajectoryManager::ApplyTOPPRA() {
+    if (!topp_ra_enabled_ || !trajectory_valid_) return false;
+    if (!use_gcopter_ || !gcopter_traj_valid_) return false;
+
+    const double v_max = std::max(max_vel_->Value(), 0.1);
+    const double a_max = std::max(max_acc_->Value(), 0.1);
+    const double eps = 1e-10;
+
+    const int num_pieces = gcopter_traj_.getPieceNum();
+    if (num_pieces < 1 || num_pieces > MAX_SEGMENTS) return false;
+
+    // Step 1: Discretize the path by arc-length parameter s
+    const int samples_per_seg = TOPPRA_SAMPLES_PER_SEG;
+    const int N = num_pieces * samples_per_seg;
+
+    if (N + 1 > TOPPRA_MAX_GRID) return false;
+
+    Eigen::VectorXd durations = gcopter_traj_.getDurations();
+
+    // Compute arc-length parameterization
+    double s_accum = 0.0;
+    toppra_s_[0] = 0.0;
+    int grid_idx = 0;
+
+    for (int seg = 0; seg < num_pieces; ++seg) {
+        double dur = durations(seg);
+        double dt_sample = dur / samples_per_seg;
+
+        for (int k = 0; k < samples_per_seg; ++k) {
+            double tau0 = dt_sample * k;
+            double tau1 = dt_sample * (k + 1);
+
+            Eigen::Vector3d v0 = gcopter_traj_[seg].getVel(tau0);
+            Eigen::Vector3d v1 = gcopter_traj_[seg].getVel(tau1);
+            double ds = 0.5 * (v0.norm() + v1.norm()) * dt_sample;
+            if (ds < eps) ds = eps;
+
+            s_accum += ds;
+            toppra_ds_[grid_idx] = ds;
+            toppra_s_[grid_idx + 1] = s_accum;
+
+            Eigen::Vector3d vel_k = gcopter_traj_[seg].getVel(tau0);
+            Eigen::Vector3d acc_k = gcopter_traj_[seg].getAcc(tau0);
+            double vnorm = vel_k.norm();
+            if (vnorm < eps) vnorm = eps;
+
+            for (int ax = 0; ax < 3; ++ax) {
+                toppra_p_prime_[grid_idx][ax] = vel_k(ax) / vnorm;
+            }
+
+            double adotv_hat = 0.0;
+            for (int ax = 0; ax < 3; ++ax) {
+                adotv_hat += acc_k(ax) * (vel_k(ax) / vnorm);
+            }
+            for (int ax = 0; ax < 3; ++ax) {
+                double tangential = adotv_hat * (vel_k(ax) / vnorm);
+                toppra_p_dprime_[grid_idx][ax] = (acc_k(ax) - tangential) / (vnorm * vnorm);
+            }
+
+            grid_idx++;
+        }
+    }
+
+    // Last grid point
+    {
+        double last_dur = durations(num_pieces - 1);
+        Eigen::Vector3d vel_end = gcopter_traj_[num_pieces - 1].getVel(last_dur);
+        Eigen::Vector3d acc_end = gcopter_traj_[num_pieces - 1].getAcc(last_dur);
+        double vnorm = vel_end.norm();
+        if (vnorm < eps) vnorm = eps;
+        for (int ax = 0; ax < 3; ++ax) {
+            toppra_p_prime_[N][ax] = vel_end(ax) / vnorm;
+        }
+        double adotv_hat = 0.0;
+        for (int ax = 0; ax < 3; ++ax) {
+            adotv_hat += acc_end(ax) * (vel_end(ax) / vnorm);
+        }
+        for (int ax = 0; ax < 3; ++ax) {
+            double tangential = adotv_hat * (vel_end(ax) / vnorm);
+            toppra_p_dprime_[N][ax] = (acc_end(ax) - tangential) / (vnorm * vnorm);
+        }
+    }
+
+    // Step 2: Compute velocity limits
+    for (int i = 0; i <= N; ++i) {
+        double x_limit = 1e10;
+        for (int ax = 0; ax < 3; ++ax) {
+            double pp = std::abs(toppra_p_prime_[i][ax]);
+            if (pp > eps) {
+                double lim = (v_max / pp) * (v_max / pp);
+                if (lim < x_limit) x_limit = lim;
+            }
+        }
+        toppra_x_max_vel_[i] = x_limit;
+    }
+
+    // Step 3: Backward pass — compute controllable sets K[i]
+    toppra_K_lo_[N] = 0.0;
+    toppra_K_hi_[N] = 0.0;
+
+    for (int i = N - 1; i >= 0; --i) {
+        double ds_i = toppra_ds_[i];
+        if (ds_i < eps) ds_i = eps;
+        double inv_2ds = 1.0 / (2.0 * ds_i);
+
+        double x_max_i = toppra_x_max_vel_[i];
+        double K_next_lo = toppra_K_lo_[i + 1];
+        double K_next_hi = toppra_K_hi_[i + 1];
+
+        // Precompute acceleration constraint slopes
+        double acc_u_lo_slope[3], acc_u_lo_intercept[3];
+        double acc_u_hi_slope[3], acc_u_hi_intercept[3];
+
+        for (int ax = 0; ax < 3; ++ax) {
+            double pp = toppra_p_prime_[i][ax];
+            double ppp = toppra_p_dprime_[i][ax];
+
+            if (std::abs(pp) < eps) {
+                if (std::abs(ppp) > eps) {
+                    double x_acc_limit = a_max / std::abs(ppp);
+                    if (x_acc_limit < x_max_i) x_max_i = x_acc_limit;
+                }
+                acc_u_lo_slope[ax] = 0.0;
+                acc_u_lo_intercept[ax] = -1e10;
+                acc_u_hi_slope[ax] = 0.0;
+                acc_u_hi_intercept[ax] = 1e10;
+            } else {
+                double inv_pp = 1.0 / pp;
+                if (pp > 0) {
+                    acc_u_lo_slope[ax] = -ppp * inv_pp;
+                    acc_u_lo_intercept[ax] = -a_max * inv_pp;
+                    acc_u_hi_slope[ax] = -ppp * inv_pp;
+                    acc_u_hi_intercept[ax] = a_max * inv_pp;
+                } else {
+                    acc_u_hi_slope[ax] = -ppp * inv_pp;
+                    acc_u_hi_intercept[ax] = -a_max * inv_pp;
+                    acc_u_lo_slope[ax] = -ppp * inv_pp;
+                    acc_u_lo_intercept[ax] = a_max * inv_pp;
+                }
+            }
+        }
+
+        // Feasibility check lambda
+        auto isFeasible = [&](double x) -> bool {
+            if (x < 0.0 || x > x_max_i) return false;
+            double u_lo_val = (K_next_lo - x) * inv_2ds;
+            double u_hi_val = (K_next_hi - x) * inv_2ds;
+            for (int ax = 0; ax < 3; ++ax) {
+                double alo = acc_u_lo_slope[ax] * x + acc_u_lo_intercept[ax];
+                double ahi = acc_u_hi_slope[ax] * x + acc_u_hi_intercept[ax];
+                if (alo > u_lo_val) u_lo_val = alo;
+                if (ahi < u_hi_val) u_hi_val = ahi;
+            }
+            return u_lo_val <= u_hi_val + eps;
+        };
+
+        // Quick scan: 32 sample points
+        const int SCAN_PTS = 32;
+        double x_step = x_max_i / SCAN_PTS;
+        int first_feasible = -1, last_feasible = -1;
+
+        for (int s = 0; s <= SCAN_PTS; ++s) {
+            double x_test = x_step * s;
+            if (isFeasible(x_test)) {
+                if (first_feasible < 0) first_feasible = s;
+                last_feasible = s;
+            }
+        }
+
+        if (first_feasible < 0) {
+            toppra_K_lo_[i] = 0.0;
+            toppra_K_hi_[i] = 0.0;
+            continue;
+        }
+
+        // Refine x_lo by bisection
+        double x_lo, x_hi_found;
+        {
+            double lo = (first_feasible > 0) ? x_step * (first_feasible - 1) : 0.0;
+            double hi = x_step * first_feasible;
+            for (int b = 0; b < 10; ++b) {
+                double mid = 0.5 * (lo + hi);
+                if (isFeasible(mid)) hi = mid; else lo = mid;
+            }
+            x_lo = hi;
+        }
+        {
+            double lo = x_step * last_feasible;
+            double hi = (last_feasible < SCAN_PTS) ? x_step * (last_feasible + 1) : x_max_i;
+            if (hi > x_max_i) hi = x_max_i;
+            for (int b = 0; b < 10; ++b) {
+                double mid = 0.5 * (lo + hi);
+                if (isFeasible(mid)) lo = mid; else hi = mid;
+            }
+            x_hi_found = lo;
+        }
+
+        toppra_K_lo_[i] = std::max(x_lo, 0.0);
+        toppra_K_hi_[i] = std::min(x_hi_found, x_max_i);
+        if (toppra_K_hi_[i] < toppra_K_lo_[i]) {
+            toppra_K_lo_[i] = 0.0;
+            toppra_K_hi_[i] = 0.0;
+        }
+    }
+
+    // Step 4: Forward pass — greedy time-optimal
+    toppra_x_[0] = 0.0;
+
+    for (int i = 0; i < N; ++i) {
+        double ds_i = toppra_ds_[i];
+        if (ds_i < eps) ds_i = eps;
+        double inv_2ds = 1.0 / (2.0 * ds_i);
+        double x_i = toppra_x_[i];
+
+        double u_hi_val = (toppra_K_hi_[i + 1] - x_i) * inv_2ds;
+
+        for (int ax = 0; ax < 3; ++ax) {
+            double pp = toppra_p_prime_[i][ax];
+            double ppp = toppra_p_dprime_[i][ax];
+            if (std::abs(pp) < eps) continue;
+            double inv_pp = 1.0 / pp;
+            double u_upper;
+            if (pp > 0) u_upper = (a_max - ppp * x_i) * inv_pp;
+            else        u_upper = (-a_max - ppp * x_i) * inv_pp;
+            if (u_upper < u_hi_val) u_hi_val = u_upper;
+        }
+
+        double u_lo_val = (toppra_K_lo_[i + 1] - x_i) * inv_2ds;
+        for (int ax = 0; ax < 3; ++ax) {
+            double pp = toppra_p_prime_[i][ax];
+            double ppp = toppra_p_dprime_[i][ax];
+            if (std::abs(pp) < eps) continue;
+            double inv_pp = 1.0 / pp;
+            double u_lower;
+            if (pp > 0) u_lower = (-a_max - ppp * x_i) * inv_pp;
+            else        u_lower = (a_max - ppp * x_i) * inv_pp;
+            if (u_lower > u_lo_val) u_lo_val = u_lower;
+        }
+
+        double u_i = u_hi_val;
+        if (u_i < u_lo_val) u_i = u_lo_val;
+        toppra_u_[i] = u_i;
+
+        double x_next = x_i + 2.0 * ds_i * u_i;
+        if (x_next < toppra_K_lo_[i + 1]) x_next = toppra_K_lo_[i + 1];
+        if (x_next > toppra_K_hi_[i + 1]) x_next = toppra_K_hi_[i + 1];
+        if (x_next < 0.0) x_next = 0.0;
+
+        toppra_x_[i + 1] = x_next;
+    }
+
+    // Step 5: Time integration — compute new segment durations
+    Eigen::VectorXd new_durations(num_pieces);
+    double new_total_time = 0.0;
+    int gi = 0;
+
+    for (int seg = 0; seg < num_pieces; ++seg) {
+        double seg_time = 0.0;
+        for (int k = 0; k < samples_per_seg; ++k) {
+            double sdot_i = std::sqrt(std::max(toppra_x_[gi], 0.0));
+            double sdot_next = std::sqrt(std::max(toppra_x_[gi + 1], 0.0));
+            double ds_i = toppra_ds_[gi];
+            double dt = 2.0 * ds_i / (sdot_i + sdot_next + eps);
+            seg_time += dt;
+            gi++;
+        }
+        if (seg_time < 0.3) seg_time = 0.3;
+        new_durations(seg) = seg_time;
+        new_total_time += seg_time;
+    }
+
+    // Step 6: Re-solve MINCO with TOPP-RA durations + iterative tightening
+    double time_ratio = new_total_time / total_duration_;
+
+    if (std::abs(time_ratio - 1.0) < 0.02) {
+        Info("TOPP-RA: trajectory already near-optimal (ratio=%.3f)\n", time_ratio);
+        return true;
+    }
+
+    Info("TOPP-RA: rescaling %.2f -> %.2f s (ratio=%.2f)\n",
+         total_duration_, new_total_time, time_ratio);
+
+    int M = num_pieces;
+    Eigen::Matrix3d headPVA, tailPVA;
+    headPVA.col(0) = waypoints_[0];
+    headPVA.col(1) = start_vel_;
+    headPVA.col(2) = Eigen::Vector3d::Zero();
+    tailPVA.col(0) = waypoints_[num_waypoints_ - 1];
+    tailPVA.col(1) = end_vel_;
+    tailPVA.col(2) = Eigen::Vector3d::Zero();
+
+    Eigen::Matrix3Xd inPs(3, M - 1);
+    for (int i = 0; i < M - 1; ++i) {
+        inPs.col(i) = waypoints_[i + 1];
+    }
+
+    // Iterative tightening
+    const int MAX_TIGHTEN_ITERS = 3;
+    const int SAMPLES_PER_SEG = 100;
+    const double SAFETY_MARGIN = 1.05;
+
+    for (int iter = 0; iter < MAX_TIGHTEN_ITERS; ++iter) {
+        minco::MINCO_S3NU solver;
+        solver.setConditions(headPVA, tailPVA, M);
+        solver.setParameters(inPs, new_durations);
+
+        Trajectory<5> new_traj;
+        solver.getTrajectory(new_traj);
+
+        if (new_traj.getPieceNum() <= 0) break;
+
+        bool feasible = true;
+        for (int seg = 0; seg < M; ++seg) {
+            double seg_dur = new_durations(seg);
+            double max_v_seg = 0.0;
+            double max_a_seg = 0.0;
+
+            for (int k = 0; k <= SAMPLES_PER_SEG; ++k) {
+                double t = seg_dur * k / static_cast<double>(SAMPLES_PER_SEG);
+                Eigen::Vector3d vel_sample = new_traj[seg].getVel(t);
+                Eigen::Vector3d acc_sample = new_traj[seg].getAcc(t);
+
+                for (int ax = 0; ax < 3; ++ax) {
+                    double av = std::abs(vel_sample(ax));
+                    double aa = std::abs(acc_sample(ax));
+                    if (av > max_v_seg) max_v_seg = av;
+                    if (aa > max_a_seg) max_a_seg = aa;
+                }
+            }
+
+            if (max_v_seg > v_max || max_a_seg > a_max) {
+                double v_scale = (max_v_seg > v_max) ? (max_v_seg / v_max) : 1.0;
+                double a_scale = (max_a_seg > a_max) ? std::sqrt(max_a_seg / a_max) : 1.0;
+                double scale = std::max(v_scale, a_scale) * SAFETY_MARGIN;
+                new_durations(seg) *= scale;
+                feasible = false;
+            }
+        }
+
+        if (feasible || iter == MAX_TIGHTEN_ITERS - 1) {
+            new_total_time = new_durations.sum();
+            gcopter_traj_ = new_traj;
+            total_duration_ = new_total_time;
+
+            num_segments_ = std::min(M, MAX_SEGMENTS);
+            for (int i = 0; i < num_segments_; ++i) {
+                segments_[i].duration = new_traj[i].getDuration();
+                segments_[i].coeffs.setZero();
+                Eigen::Matrix<double, 3, 6> cm = new_traj[i].getCoeffMat();
+                for (int axis = 0; axis < 3; ++axis) {
+                    for (int c = 0; c <= 5; ++c) {
+                        segments_[i].coeffs(axis, c) = cm(axis, 5 - c);
+                    }
+                }
+            }
+
+            if (feasible)
+                Info("TOPP-RA: limits satisfied after %d iteration(s)\n", iter + 1);
+            else
+                Info("TOPP-RA: max iterations reached, accepting best result\n");
+            break;
+        }
+
+        Info("TOPP-RA: tightening iteration %d, scaling up violating segments\n", iter + 1);
+    }
+
+    return true;
+}
+
+// ################################################################
+// SOTA Upgrade 4: FIRI Corridor Generation (unified)
+// ################################################################
+bool TrajectoryManager::GenerateCorridors(
+    const std::vector<Eigen::Vector3d> &path_wps,
+    std::vector<Eigen::MatrixX4d> &hPolytopes,
+    std::vector<Corridor> &aabb_corridors) {
+
+    hPolytopes.clear();
+    aabb_corridors.clear();
+
+    int n_segs = static_cast<int>(path_wps.size()) - 1;
+    if (n_segs < 1) return false;
+
+    double sm = safety_margin_->Value();
+
+    // Workspace bounding box as H-representation
+    Eigen::MatrixX4d bdBox(6, 4);
+    bdBox.row(0) <<  1.0,  0.0,  0.0, -WS_X_MAX;
+    bdBox.row(1) << -1.0,  0.0,  0.0,  WS_X_MIN;
+    bdBox.row(2) <<  0.0,  1.0,  0.0, -WS_Y_MAX;
+    bdBox.row(3) <<  0.0, -1.0,  0.0,  WS_Y_MIN;
+    bdBox.row(4) <<  0.0,  0.0,  1.0, -WS_Z_MAX;
+    bdBox.row(5) <<  0.0,  0.0, -1.0,  WS_Z_MIN;
+
+    double search_radius = 2.0;
+
+    for (int i = 0; i < n_segs; ++i) {
+        const Eigen::Vector3d &seg_a = path_wps[i];
+        const Eigen::Vector3d &seg_b = path_wps[i + 1];
+
+        std::vector<Eigen::Vector3d> obs_pts = GetNearbyObstaclePoints(seg_a, seg_b, search_radius);
+        Eigen::Matrix3Xd obs_pc(3, static_cast<int>(obs_pts.size()));
+        for (int j = 0; j < static_cast<int>(obs_pts.size()); ++j) {
+            obs_pc.col(j) = obs_pts[j];
+        }
+
+        Eigen::MatrixX4d hPoly;
+        bool firi_ok = false;
+
+        if (obs_pc.cols() == 0 || HasNonCoplanarPoints(obs_pc)) {
+            firi_ok = firi::firi(bdBox, obs_pc, seg_a, seg_b, hPoly);
+        }
+
+        if (firi_ok) {
+            if (hPoly.rows() >= 4 &&
+                IsInsidePolytope(hPoly, seg_a) &&
+                IsInsidePolytope(hPoly, seg_b)) {
+                hPolytopes.push_back(hPoly);
+            } else {
+                firi_ok = false;
+            }
+        }
+
+        if (!firi_ok) {
+            hPolytopes.push_back(bdBox);
+            Info("GenerateCorridors: FIRI failed for seg %d, using AABB fallback\n", i);
+        }
+
+        // Always build an AABB corridor as backup
+        Corridor c;
+        c.lo = Eigen::Vector3d(
+            std::min(seg_a.x(), seg_b.x()) - sm - 0.5,
+            std::min(seg_a.y(), seg_b.y()) - sm - 0.5,
+            std::min(seg_a.z(), seg_b.z()) - sm - 0.5);
+        c.hi = Eigen::Vector3d(
+            std::max(seg_a.x(), seg_b.x()) + sm + 0.5,
+            std::max(seg_a.y(), seg_b.y()) + sm + 0.5,
+            std::max(seg_a.z(), seg_b.z()) + sm + 0.5);
+        c.lo.x() = std::max(c.lo.x(), WS_X_MIN);
+        c.lo.y() = std::max(c.lo.y(), WS_Y_MIN);
+        c.lo.z() = std::max(c.lo.z(), WS_Z_MIN);
+        c.hi.x() = std::min(c.hi.x(), WS_X_MAX);
+        c.hi.y() = std::min(c.hi.y(), WS_Y_MAX);
+        c.hi.z() = std::min(c.hi.z(), WS_Z_MAX);
+        aabb_corridors.push_back(c);
+    }
+
+    Info("GenerateCorridors: %d segments processed\n", n_segs);
+    return true;
+}
+
+// ################################################################
+// SOTA Upgrade 5: Contingency Trajectory (decelerate to hover)
+// ################################################################
+void TrajectoryManager::GenerateContingencyTrajectory(
+    const Eigen::Vector3d &pos,
+    const Eigen::Vector3d &vel,
+    const Eigen::Vector3d &acc) {
+
+    contingency_valid_ = false;
+
+    double v_norm = vel.norm();
+    double a_max_val = max_acc_->Value();
+    if (a_max_val < 0.1) a_max_val = 0.1;
+
+    double t_stop = (v_norm > 0.01) ? (v_norm / a_max_val) : 0.5;
+    if (t_stop < 0.3) t_stop = 0.3;
+    if (t_stop > 3.0) t_stop = 3.0;
+
+    Eigen::Vector3d hover_pos = pos + vel * (t_stop * 0.5);
+
+    Eigen::Matrix3d headPVA, tailPVA;
+    headPVA.col(0) = pos;
+    headPVA.col(1) = vel;
+    headPVA.col(2) = acc;
+    tailPVA.col(0) = hover_pos;
+    tailPVA.col(1) = Eigen::Vector3d::Zero();
+    tailPVA.col(2) = Eigen::Vector3d::Zero();
+
+    Eigen::VectorXd ts(1);
+    ts(0) = t_stop;
+
+    Eigen::Matrix3Xd inPs(3, 0);
+
+    minco::MINCO_S3NU solver;
+    solver.setConditions(headPVA, tailPVA, 1);
+    solver.setParameters(inPs, ts);
+
+    Trajectory<5> traj;
+    solver.getTrajectory(traj);
+
+    if (traj.getPieceNum() > 0) {
+        contingency_traj_ = traj;
+        contingency_valid_ = true;
+        Info("Contingency trajectory: decel-to-hover in %.2f s\n", t_stop);
+    }
+}
+
+// ============================================================
+// SOTA Upgrade 6: ESDF-Lite BFS wavefront distance field
+// ============================================================
+void TrajectoryManager::ComputeDistanceField() {
+    size_t N = static_cast<size_t>(grid_nx_) * grid_ny_ * grid_nz_;
+    distance_field_.assign(N, std::numeric_limits<float>::max());
+
+    std::queue<int> bfs;
+
+    // Initialize: obstacle cells = 0, seed BFS from them
+    for (size_t i = 0; i < N; ++i) {
+        if (grid_data_[i]) {
+            distance_field_[i] = 0.0f;
+            bfs.push(static_cast<int>(i));
+        }
+    }
+
+    // 6-connected BFS (Manhattan distance — lightweight for ARM)
+    const int dx[6] = {1, -1, 0, 0, 0, 0};
+    const int dy[6] = {0, 0, 1, -1, 0, 0};
+    const int dz[6] = {0, 0, 0, 0, 1, -1};
+
+    while (!bfs.empty()) {
+        int idx = bfs.front();
+        bfs.pop();
+
+        int iz = idx % grid_nz_;
+        int rem = idx / grid_nz_;
+        int iy = rem % grid_ny_;
+        int ix = rem / grid_ny_;
+
+        float next_dist = distance_field_[idx] + static_cast<float>(grid_res_);
+
+        for (int d = 0; d < 6; ++d) {
+            int nx = ix + dx[d];
+            int ny = iy + dy[d];
+            int nz = iz + dz[d];
+            if (nx < 0 || nx >= grid_nx_ || ny < 0 || ny >= grid_ny_ || nz < 0 || nz >= grid_nz_)
+                continue;
+            int nidx = nx * grid_ny_ * grid_nz_ + ny * grid_nz_ + nz;
+            if (next_dist < distance_field_[nidx]) {
+                distance_field_[nidx] = next_dist;
+                bfs.push(nidx);
+            }
+        }
+    }
+}
+
+double TrajectoryManager::GetObstacleDistance(const Eigen::Vector3d &world_pos) const {
+    if (distance_field_.empty()) return std::numeric_limits<double>::max();
+
+    Eigen::Vector3i gi = WorldToGrid(world_pos);
+    if (!GridInBounds(gi.x(), gi.y(), gi.z())) return 0.0;
+
+    int idx = gi.x() * grid_ny_ * grid_nz_ + gi.y() * grid_nz_ + gi.z();
+    return static_cast<double>(distance_field_[idx]);
+}
+
+// ============================================================
+// SOTA: Precompute circular inflation template
+// ============================================================
+void TrajectoryManager::PrecomputeInflationTemplate(double radius) {
+    if (std::abs(radius - inflation_template_radius_) < 1e-6 && !inflation_template_.empty())
+        return;
+
+    inflation_template_.clear();
+    inflation_template_radius_ = radius;
+
+    int r_cells = static_cast<int>(std::ceil(radius / grid_res_));
+    double r2 = radius * radius;
+
+    for (int dx = -r_cells; dx <= r_cells; ++dx) {
+        for (int dy = -r_cells; dy <= r_cells; ++dy) {
+            double wx = dx * grid_res_;
+            double wy = dy * grid_res_;
+            if (wx * wx + wy * wy <= r2) {
+                InflationOffset off;
+                off.dx = dx;
+                off.dy = dy;
+                inflation_template_.push_back(off);
+            }
+        }
+    }
+}
+
+// ============================================================
+// SOTA Upgrade 9: Check if any obstacle moved significantly
+// ============================================================
+bool TrajectoryManager::ObstaclesMoved() const {
+    if (num_obstacles_ != prev_num_obstacles_) return true;
+    for (int i = 0; i < num_obstacles_; ++i) {
+        double dx = obstacles_[i].pos.x() - prev_obstacle_pos_[i].x();
+        double dy = obstacles_[i].pos.y() - prev_obstacle_pos_[i].y();
+        double dz = obstacles_[i].pos.z() - prev_obstacle_pos_[i].z();
+        if (dx * dx + dy * dy + dz * dz > grid_res_ * grid_res_) return true;
+    }
+    return false;
+}
+
+// ============================================================
+// SOTA Upgrade 9: Incremental occupancy grid update
+// ============================================================
+void TrajectoryManager::BuildOccupancyGridIncremental() {
+    // First call or grid bounds changed: full rebuild
+    if (!grid_initialized_ || grid_dirty_) {
+        BuildOccupancyGrid();
+        for (int i = 0; i < num_obstacles_; ++i) {
+            prev_obstacle_pos_[i] = obstacles_[i].pos;
+        }
+        prev_num_obstacles_ = num_obstacles_;
+        grid_dirty_ = false;
+        grid_initialized_ = true;
+        distance_field_valid_ = false;
+        return;
+    }
+
+    // Check if obstacles moved
+    if (!ObstaclesMoved()) return;
+
+    // Incremental: rebuild with pre-computed inflation template for speed
+    double sm = safety_margin_->Value();
+    double inflate_radius = 0.0;
+    for (int i = 0; i < num_obstacles_; ++i) {
+        inflate_radius = std::max(inflate_radius, obstacles_[i].radius + sm);
+    }
+    PrecomputeInflationTemplate(inflate_radius);
+
+    ClearGrid();
+
+    // Mark ground plane
+    int iz_ground = -1;
+    for (int iz = 0; iz < grid_nz_; ++iz) {
+        double wz = grid_origin_.z() + (iz + 0.5) * grid_res_;
+        if (wz >= -sm) { iz_ground = iz; break; }
+    }
+    if (iz_ground >= 0) {
+        int nz_ground = grid_nz_ - iz_ground;
+        for (int ix = 0; ix < grid_nx_; ++ix) {
+            for (int iy = 0; iy < grid_ny_; ++iy) {
+                size_t base = static_cast<size_t>(ix) * grid_ny_ * grid_nz_
+                            + static_cast<size_t>(iy) * grid_nz_
+                            + static_cast<size_t>(iz_ground);
+                std::memset(&grid_data_[base], 1u, static_cast<size_t>(nz_ground));
+            }
+        }
+    }
+
+    // Mark obstacles using precomputed template
+    for (int i = 0; i < num_obstacles_; ++i) {
+        double obs_x = obstacles_[i].pos.x();
+        double obs_y = obstacles_[i].pos.y();
+        double obs_radius = obstacles_[i].radius + sm;
+
+        if (std::abs(obs_radius - inflation_template_radius_) < grid_res_ * 0.5) {
+            Eigen::Vector3i center_g = WorldToGrid(Eigen::Vector3d(obs_x, obs_y, 0.0));
+            for (size_t t = 0; t < inflation_template_.size(); ++t) {
+                int gx = center_g.x() + inflation_template_[t].dx;
+                int gy = center_g.y() + inflation_template_[t].dy;
+                if (gx >= 0 && gx < grid_nx_ && gy >= 0 && gy < grid_ny_) {
+                    size_t base = static_cast<size_t>(gx) * grid_ny_ * grid_nz_
+                                + static_cast<size_t>(gy) * grid_nz_;
+                    std::memset(&grid_data_[base], 1u, static_cast<size_t>(grid_nz_));
+                }
+            }
+        } else {
+            MarkCylinderOccupied(obs_x, obs_y, obs_radius);
+        }
+
+        // Spatio-temporal prediction
+        double obs_speed = obstacles_[i].vel.norm();
+        if (obs_speed > 0.01 && total_duration_ > 0.0) {
+            double remaining_time = total_duration_;
+            if (execution_time_set_ && last_update_time_ > 0.0) {
+                double elapsed = last_update_time_ - execution_start_time_;
+                remaining_time = std::max(total_duration_ - elapsed, 1.0);
+            }
+            double pred_horizon = std::min(remaining_time, 5.0);
+            for (int step = 1; step <= 4; ++step) {
+                double t_pred = pred_horizon * step / 4.0;
+                double pred_x = obs_x + obstacles_[i].vel.x() * t_pred;
+                double pred_y = obs_y + obstacles_[i].vel.y() * t_pred;
+                double inflated_radius = obs_radius + sm * t_pred;
+                MarkCylinderOccupied(pred_x, pred_y, inflated_radius);
+            }
+        }
+    }
+
+    // Update cached positions
+    for (int i = 0; i < num_obstacles_; ++i) {
+        prev_obstacle_pos_[i] = obstacles_[i].pos;
+    }
+    prev_num_obstacles_ = num_obstacles_;
+    distance_field_valid_ = false;
+    cache_valid_ = false;
 }
