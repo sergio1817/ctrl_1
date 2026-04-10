@@ -39,6 +39,7 @@
 #include <cstring>
 #include <queue>
 #include <limits>
+#include <stdexcept>
 
 using std::string;
 using namespace flair::core;
@@ -1385,6 +1386,26 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
 
     if (hPolytopes.empty() || num_waypoints_ < 2) return false;
 
+    // --- Pre-validate polytopes before passing to GCOPTER ---
+    // Bad polytopes (too few faces, near-zero normals) cause crashes in
+    // geo_utils::enumerateVs() → quickhull.
+    for (int pi = 0; pi < static_cast<int>(hPolytopes.size()); ++pi) {
+        const Eigen::MatrixX4d &hp = hPolytopes[pi];
+        if (hp.rows() < 4) {
+            Warn("GCOPTER constrained: polytope %d has only %d faces (need >=4), aborting\n",
+                 pi, static_cast<int>(hp.rows()));
+            return false;
+        }
+        for (int r = 0; r < hp.rows(); ++r) {
+            double nrm = hp.row(r).head<3>().norm();
+            if (nrm < 1e-10) {
+                Warn("GCOPTER constrained: polytope %d face %d has near-zero normal (%.2e), aborting\n",
+                     pi, r, nrm);
+                return false;
+            }
+        }
+    }
+
     double v_max = max_vel_->Value();
     if (v_max < 0.1) v_max = 0.1;
     double a_max = max_acc_->Value();
@@ -1434,20 +1455,42 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
     Eigen::VectorXd physicalParams(6);
     physicalParams << mass, grav, 0.0, 0.0, 0.0, 1e-4;
 
-    gcopter::GCOPTER_PolytopeSFC solver;
-    if (!solver.setup(timeWeight, headPVA, tailPVA, hPolytopes,
-                      lengthPerPiece, smoothingFactor, integralResolution,
-                      magnitudeBounds, penaltyWeights, physicalParams)) {
-        Warn("GCOPTER constrained: setup failed\n");
+    // --- Wrap the GCOPTER solve in try-catch ---
+    // quickhull / enumerateVs can throw on degenerate geometry even after our
+    // pre-validation (e.g. polytope intersection produces degenerate faces).
+    Trajectory<5> traj;
+    double cost;
+    try {
+        gcopter::GCOPTER_PolytopeSFC solver;
+        if (!solver.setup(timeWeight, headPVA, tailPVA, hPolytopes,
+                          lengthPerPiece, smoothingFactor, integralResolution,
+                          magnitudeBounds, penaltyWeights, physicalParams)) {
+            Warn("GCOPTER constrained: setup failed\n");
+            return false;
+        }
+
+        cost = solver.optimize(traj, 1.0e-4);
+    } catch (const std::exception &e) {
+        Warn("GCOPTER constrained: exception during solve: %s\n", e.what());
+        return false;
+    } catch (...) {
+        Warn("GCOPTER constrained: unknown exception during solve\n");
         return false;
     }
 
-    Trajectory<5> traj;
-    double cost = solver.optimize(traj, 1.0e-4);
-
-    if (std::isinf(cost) || std::isnan(cost) || traj.getPieceNum() < 1) {
+    // --- Handle L-BFGS failure gracefully ---
+    // Check for NaN/Inf cost and negative cost (indicates L-BFGS negative
+    // line-search step).  Do NOT extract a trajectory from a failed optimization.
+    if (std::isinf(cost) || std::isnan(cost) || cost < 0.0 || traj.getPieceNum() < 1) {
         Warn("GCOPTER constrained: optimization failed (cost=%.4f, pieces=%d)\n",
              cost, traj.getPieceNum());
+        return false;
+    }
+
+    // Sanity check: trajectory duration must be positive and finite
+    double dur = traj.getTotalDuration();
+    if (std::isnan(dur) || std::isinf(dur) || dur <= 0.0) {
+        Warn("GCOPTER constrained: invalid trajectory duration %.4f\n", dur);
         return false;
     }
 
@@ -2656,6 +2699,20 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
             }
         }
 
+        // Add intermediate waypoints when A* path has only 2 points.
+        // Trivial 2-point paths produce degenerate FIRI inputs that always
+        // fail, triggering the fallback corridor.  Inserting a midpoint gives
+        // FIRI a real segment to work with.
+        if (seg_path.size() == 2) {
+            double seg_len = (seg_path[1] - seg_path[0]).norm();
+            if (seg_len > 0.2) { // only if segment is non-trivial
+                Eigen::Vector3d mid = 0.5 * (seg_path[0] + seg_path[1]);
+                seg_path.insert(seg_path.begin() + 1, mid);
+                Info("A* seg %d->%d: inserted midpoint for 2-point path (len=%.2f)\n",
+                     i, i+1, seg_len);
+            }
+        }
+
         // Append (skip first to avoid duplicates)
         for (size_t j = 1; j < seg_path.size(); ++j) {
             full_path.push_back(seg_path[j]);
@@ -3213,7 +3270,39 @@ bool TrajectoryManager::GenerateCorridors(
     hPolytopes.clear();
     aabb_corridors.clear();
 
-    int n_segs = static_cast<int>(path_wps.size()) - 1;
+    // --- Merge near-coincident waypoints to avoid degenerate zero-length
+    //     segments that cause FIRI to fail ---
+    std::vector<Eigen::Vector3d> merged_wps;
+    merged_wps.reserve(path_wps.size());
+    merged_wps.push_back(path_wps[0]);
+    const double merge_thresh = 0.1; // metres
+    for (size_t k = 1; k < path_wps.size(); ++k) {
+        if ((path_wps[k] - merged_wps.back()).norm() > merge_thresh) {
+            merged_wps.push_back(path_wps[k]);
+        }
+    }
+    // Must keep the final waypoint even if it was merged
+    if (merged_wps.back() != path_wps.back()) {
+        merged_wps.push_back(path_wps.back());
+    }
+    if (merged_wps.size() < 2) {
+        if (path_wps.size() >= 2) {
+            merged_wps.clear();
+            merged_wps.push_back(path_wps.front());
+            merged_wps.push_back(path_wps.back());
+        } else {
+            return false;
+        }
+    }
+    if (merged_wps.size() < path_wps.size()) {
+        Info("GenerateCorridors: merged %d near-coincident waypoints (%d -> %d)\n",
+             static_cast<int>(path_wps.size() - merged_wps.size()),
+             static_cast<int>(path_wps.size()), static_cast<int>(merged_wps.size()));
+    }
+
+    // Use merged_wps from here on
+    const std::vector<Eigen::Vector3d> &wps = merged_wps;
+    int n_segs = static_cast<int>(wps.size()) - 1;
     if (n_segs < 1) return false;
 
     double sm = safety_margin_->Value();
@@ -3230,8 +3319,8 @@ bool TrajectoryManager::GenerateCorridors(
     double search_radius = 2.0;
 
     for (int i = 0; i < n_segs; ++i) {
-        const Eigen::Vector3d &seg_a = path_wps[i];
-        const Eigen::Vector3d &seg_b = path_wps[i + 1];
+        const Eigen::Vector3d &seg_a = wps[i];
+        const Eigen::Vector3d &seg_b = wps[i + 1];
 
         std::vector<Eigen::Vector3d> obs_pts = GetNearbyObstaclePoints(seg_a, seg_b, search_radius);
         Eigen::Matrix3Xd obs_pc(3, static_cast<int>(obs_pts.size()));
@@ -3257,8 +3346,43 @@ bool TrajectoryManager::GenerateCorridors(
         }
 
         if (!firi_ok) {
-            hPolytopes.push_back(bdBox);
-            Info("GenerateCorridors: FIRI failed for seg %d, using AABB fallback\n", i);
+            // Build a tight local AABB around the segment endpoints instead of
+            // the full workspace bounding box.  The enormous bdBox causes
+            // geo_utils::enumerateVs() → quickhull to crash on degenerate faces
+            // (division-by-near-zero in normal.dot(point)).
+            const double aabb_margin = 1.0; // metres
+            Eigen::Vector3d lo, hi;
+            for (int a = 0; a < 3; ++a) {
+                lo(a) = std::min(seg_a(a), seg_b(a)) - aabb_margin;
+                hi(a) = std::max(seg_a(a), seg_b(a)) + aabb_margin;
+            }
+            // Clamp to workspace bounds
+            lo.x() = std::max(lo.x(), WS_X_MIN);
+            lo.y() = std::max(lo.y(), WS_Y_MIN);
+            lo.z() = std::max(lo.z(), WS_Z_MIN);
+            hi.x() = std::min(hi.x(), WS_X_MAX);
+            hi.y() = std::min(hi.y(), WS_Y_MAX);
+            hi.z() = std::min(hi.z(), WS_Z_MAX);
+            // Ensure minimum extent so the polytope is non-degenerate
+            for (int a = 0; a < 3; ++a) {
+                if (hi(a) - lo(a) < 0.2) {
+                    double mid = 0.5 * (lo(a) + hi(a));
+                    lo(a) = mid - 0.1;
+                    hi(a) = mid + 0.1;
+                }
+            }
+            // Convert AABB to H-representation (6 half-planes)
+            Eigen::MatrixX4d localBox(6, 4);
+            localBox.row(0) <<  1.0,  0.0,  0.0, -hi.x();
+            localBox.row(1) << -1.0,  0.0,  0.0,  lo.x();
+            localBox.row(2) <<  0.0,  1.0,  0.0, -hi.y();
+            localBox.row(3) <<  0.0, -1.0,  0.0,  lo.y();
+            localBox.row(4) <<  0.0,  0.0,  1.0, -hi.z();
+            localBox.row(5) <<  0.0,  0.0, -1.0,  lo.z();
+            hPolytopes.push_back(localBox);
+            Info("GenerateCorridors: FIRI failed for seg %d, using tight AABB fallback "
+                 "(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)\n",
+                 i, lo.x(), lo.y(), lo.z(), hi.x(), hi.y(), hi.z());
         }
 
         // Always build an AABB corridor as backup
