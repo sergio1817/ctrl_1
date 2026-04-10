@@ -2325,26 +2325,60 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
         }
     }
 
-    // Excessive-detour guard: if the A* path is more than 4x longer than the
-    // direct start-to-goal distance, the path has taken a huge detour (e.g. because
-    // the x/y-swapped obstacle is blocking the route at a bad angle). In that case
-    // drop all intermediate points and let GCOPTER handle it via FIRI corridors;
-    // this prevents the MINCO polynomial from oscillating ±3 m around distant waypoints.
+    // Detour / reversal guard.
+    //
+    // Two independent triggers both revert to a direct [start, goal] path:
+    //
+    //  (A) Distance ratio: path_len > 2.5 × direct_dist
+    //      Catches large U-shape detours regardless of turn angle.
+    //
+    //  (B) Direction reversal: any consecutive waypoint triple has
+    //      an angle > 90° (dot product < 0).
+    //      Even a moderate reversal forces MINCO to produce a near-zero
+    //      velocity crossing *inside* the approach sub-segment, which
+    //      the user sees as a mid-flight stop.
+    //
+    // When triggered we fly direct start→goal and let GCOPTER/FIRI handle
+    // keeping the trajectory clear of the obstacle through corridor geometry.
     if (full_path.size() >= 2) {
+        // (A) distance ratio
         double direct_dist = (full_path.back() - full_path.front()).norm();
-        if (direct_dist > 0.5) {
-            double path_len = 0.0;
-            for (size_t k = 1; k < full_path.size(); ++k)
-                path_len += (full_path[k] - full_path[k-1]).norm();
-            if (path_len > 2.5 * direct_dist) {
-                Warn("A* detour %.1fm > 2.5x direct %.1fm — reverting to direct corridor path\n",
-                     path_len, direct_dist);
-                Eigen::Vector3d start_pt = full_path.front();
-                Eigen::Vector3d goal_pt  = full_path.back();
-                full_path.clear();
-                full_path.push_back(start_pt);
-                full_path.push_back(goal_pt);
+        double path_len = 0.0;
+        for (size_t k = 1; k < full_path.size(); ++k)
+            path_len += (full_path[k] - full_path[k-1]).norm();
+
+        // (B) direction reversal
+        bool has_reversal = false;
+        int  reversal_idx = -1;
+        for (size_t k = 1; k + 1 < full_path.size(); ++k) {
+            Eigen::Vector3d d1 = full_path[k]   - full_path[k-1];
+            Eigen::Vector3d d2 = full_path[k+1] - full_path[k];
+            double n1 = d1.norm(), n2 = d2.norm();
+            if (n1 > 1e-6 && n2 > 1e-6 && (d1 / n1).dot(d2 / n2) < 0.0) {
+                has_reversal = true;
+                reversal_idx = static_cast<int>(k);
+                break;
             }
+        }
+
+        // Always log so we can diagnose from the Flair console
+        Info("A* guard: pts=%d len=%.2f direct=%.2f ratio=%.2f reversal=%d(idx=%d)\n",
+             static_cast<int>(full_path.size()), path_len, direct_dist,
+             direct_dist > 1e-6 ? path_len / direct_dist : 0.0,
+             has_reversal ? 1 : 0, reversal_idx);
+
+        bool trigger_ratio    = (direct_dist > 0.3) && (path_len > 2.5 * direct_dist);
+        bool trigger_reversal = has_reversal;
+
+        if (trigger_ratio || trigger_reversal) {
+            Warn("A* guard triggered (ratio=%.2f reversal=%d) — using direct path\n",
+                 direct_dist > 1e-6 ? path_len / direct_dist : 0.0,
+                 has_reversal ? 1 : 0);
+            Eigen::Vector3d start_pt = full_path.front();
+            Eigen::Vector3d goal_pt  = full_path.back();
+            full_path.clear();
+            full_path.push_back(start_pt);
+            full_path.push_back(goal_pt);
         }
     }
 
