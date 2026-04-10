@@ -251,6 +251,16 @@ private:
     // --- SOTA Upgrade 3: TOPP-RA post-processing ---
     bool ApplyTOPPRA();
 
+    // --- Corridor struct (needed by GenerateCorridors and BuildCorridors) ---
+    struct Corridor {
+        Eigen::Vector3d lo, hi;
+        bool contains(const Eigen::Vector3d &p) const {
+            return p.x() >= lo.x() && p.x() <= hi.x() &&
+                   p.y() >= lo.y() && p.y() <= hi.y() &&
+                   p.z() >= lo.z() && p.z() <= hi.z();
+        }
+    };
+
     // --- SOTA Upgrade 4: FIRI corridor generation ---
     bool GenerateCorridors(const std::vector<Eigen::Vector3d> &waypoints,
                            std::vector<Eigen::MatrixX4d> &hPolytopes,
@@ -411,14 +421,6 @@ private:
                   std::vector<Eigen::Vector3d> &path);
     std::vector<Eigen::Vector3d> SimplifyPath(const std::vector<Eigen::Vector3d> &input) const;
 
-    struct Corridor {
-        Eigen::Vector3d lo, hi;
-        bool contains(const Eigen::Vector3d &p) const {
-            return p.x() >= lo.x() && p.x() <= hi.x() &&
-                   p.y() >= lo.y() && p.y() <= hi.y() &&
-                   p.z() >= lo.z() && p.z() <= hi.z();
-        }
-    };
     bool BuildCorridors(const std::vector<Eigen::Vector3d> &path,
                         double margin,
                         std::vector<Corridor> &corridors);
