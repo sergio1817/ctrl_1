@@ -1464,17 +1464,20 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
     tailPVA.col(2) = Eigen::Vector3d::Zero();
 
     // Parameters for GCOPTER_PolytopeSFC
-    // Values aligned with the original ZJU GCOPTER global_planning.yaml defaults,
-    // adjusted for our lower velocity limits.  The key insight: GCOPTER uses
-    // penalty methods, not hard constraints.  Penalty weights must be high enough
-    // relative to timeWeight for constraints to be respected.
-    //
-    // Reference: gcopter/config/global_planning.yaml
-    //   WeightT=20, ChiVec=[1e4,1e4,1e4,1e4,1e5], IntegralIntervs=16
-    double timeWeight = 20.0;        // rho: penalty on total time (original default)
-    double lengthPerPiece = 1.0;     // meters per MINCO piece (finer for small workspace)
+    // Original GCOPTER defaults (global_planning.yaml): WeightT=20, MaxVelMag=4.0
+    // The time penalty competes with constraint penalties.  At low v_max the optimizer
+    // strongly prefers shorter (faster) trajectories, overwhelming the velocity penalty.
+    // Scale timeWeight quadratically with the velocity ratio so the constraint/time
+    // trade-off stays balanced regardless of v_max.
+    const double kOrigWeightT = 20.0;
+    const double kOrigVmax    = 4.0;   // m/s in original config
+    double v_ratio = std::min(v_max / kOrigVmax, 1.0);  // clamp at 1 for fast drones
+    double timeWeight = kOrigWeightT * v_ratio * v_ratio;  // e.g. v_max=1→1.25, v_max=2→5.0
+    Info("GCOPTER params: v_max=%.2f, timeWeight=%.2f (v_ratio=%.2f)\n",
+         v_max, timeWeight, v_ratio);
+    double lengthPerPiece = 1.0;
     double smoothingFactor = 0.01;
-    int integralResolution = 16;     // quadrature resolution (original default)
+    int integralResolution = 16;
 
     // Magnitude bounds: [v_max, omega_max, theta_max, thrust_min, thrust_max]
     double mass = 0.61;  // kg (small quadrotor, from original config)
@@ -1490,14 +1493,16 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
                        thrust_max;      // max thrust (N)
 
     // Penalty weights: [position/corridor, velocity, body_rate, tilt_angle, thrust]
-    // All 1e4 except thrust at 1e5 — matching original GCOPTER defaults.
-    // These must dominate timeWeight for constraints to be respected.
+    // Original defaults: [1e4, 1e4, 1e4, 1e4, 1e5] at v_max=4.0.
+    // At lower v_max, velocity is the hardest constraint to satisfy, so scale its
+    // penalty inversely with v_ratio^2 to maintain the same effective pressure.
+    double vel_penalty_scale = 1.0 / (v_ratio * v_ratio);  // 16x at v_max=1
     Eigen::VectorXd penaltyWeights(5);
-    penaltyWeights << 1.0e4,     // corridor (position) penalty
-                      1.0e4,     // velocity penalty
-                      1.0e4,     // body rate penalty
-                      1.0e4,     // tilt angle penalty
-                      1.0e5;     // thrust penalty
+    penaltyWeights << 1.0e4,                      // corridor (position) penalty
+                      1.0e4 * vel_penalty_scale,  // velocity penalty (1.6e5 at v_max=1)
+                      1.0e4,                      // body rate penalty
+                      1.0e4,                      // tilt angle penalty
+                      1.0e5;                      // thrust penalty
 
     // Physical params: [mass, grav, drag_coeff_x, drag_coeff_y, drag_coeff_z, yaw_dot]
     // NOTE: GCOPTER's flatness map assumes z-UP (ENU). Our planner uses NED (z-down).
@@ -2839,13 +2844,17 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
                  static_cast<int>(hPolytopes.size()));
             return true;
         }
-        // GCOPTER constrained failed.  Do NOT fall back to unconstrained GCOPTER:
-        // the unconstrained solver ignores obstacle corridors entirely, producing
-        // a trajectory that flies straight through obstacles.  This triggers the
-        // safety monitor, which replans, which also fails constrained, creating
-        // an infinite contingency→replan loop.  Instead, return false so the
-        // caller (Replan / safety monitor) transitions to HOLDING.
-        Warn("GCOPTER constrained failed — not using unconstrained fallback near obstacles\n");
+        // GCOPTER constrained failed.  Fall back to unconstrained GCOPTER which follows
+        // the A*-generated waypoints (obstacle-avoiding path) but without corridor
+        // enforcement.  The path itself avoids obstacles; TOPP-RA will enforce velocity.
+        // The safety monitor HOLDING logic (max replan failures) prevents loops.
+        Warn("GCOPTER constrained failed, trying unconstrained GCOPTER on A* path\n");
+        bool ok2 = SolveGCOPTER();
+        if (ok2) {
+            Warn("using unconstrained GCOPTER on obstacle-avoidance path\n");
+            return true;
+        }
+        Warn("GCOPTER with obstacles failed entirely\n");
         return false;
     } else if (use_gcopter_) {
         bool ok = SolveGCOPTER();
