@@ -321,6 +321,10 @@ private:
     bool   contingency_active_;          ///< true while executing a contingency (prevents re-triggering)
     double contingency_start_time_;      ///< when contingency was activated (seconds)
     double contingency_duration_;        ///< expected duration of the contingency trajectory
+    int    post_contingency_replan_attempts_; ///< consecutive replan attempts after contingency near obstacle
+    double post_contingency_cooldown_until_;  ///< timestamp until which no new contingency is triggered (prevents loop)
+    static constexpr int kMaxPostContingencyReplans = 2;  ///< max replans before giving up and holding
+    static constexpr double kPostContingencyCooldown = 3.0; ///< seconds to suppress re-triggering after holding
 
     // --- Adaptive prediction horizon ---
     double last_update_time_;

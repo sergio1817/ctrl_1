@@ -133,6 +133,8 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       contingency_active_(false),
       contingency_start_time_(0.0),
       contingency_duration_(0.0),
+      post_contingency_replan_attempts_(0),
+      post_contingency_cooldown_until_(0.0),
       last_update_time_(0.0)
 {
     // --------------------------------------------------------
@@ -422,29 +424,55 @@ void TrajectoryManager::Update(Time time,
                     contingency_active_ = false;
                     if (obs_dist >= emergency_distance_) {
                         // Obstacle cleared — allow normal replanning
+                        post_contingency_replan_attempts_ = 0;
                         status_label_->SetText("HOVER (post-contingency)");
                         Info("safety monitor: contingency completed, obstacle cleared (%.2fm)\n", obs_dist);
                     } else {
-                        // Still too close — try to replan around the obstacle first
-                        Warn("safety monitor: contingency done but obstacle still at %.2fm, attempting replan\n", obs_dist);
-                        Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
-                                            static_cast<float>(current_uav_pos_.x()),
-                                            static_cast<float>(current_uav_pos_.z()));
-                        Vector3Df cur_vel_w(static_cast<float>(current_uav_vel_.y()),
-                                            static_cast<float>(current_uav_vel_.x()),
-                                            static_cast<float>(current_uav_vel_.z()));
-                        if (!Replan(cur_pos_w, cur_vel_w)) {
-                            // Replan failed — hold position as last resort
+                        // Still too close — try limited replans, then hold
+                        post_contingency_replan_attempts_++;
+                        if (post_contingency_replan_attempts_ <= kMaxPostContingencyReplans) {
+                            Warn("safety monitor: contingency done, obstacle at %.2fm, replan attempt %d/%d\n",
+                                 obs_dist, post_contingency_replan_attempts_, kMaxPostContingencyReplans);
+                            Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
+                                                static_cast<float>(current_uav_pos_.x()),
+                                                static_cast<float>(current_uav_pos_.z()));
+                            Vector3Df cur_vel_w(static_cast<float>(current_uav_vel_.y()),
+                                                static_cast<float>(current_uav_vel_.x()),
+                                                static_cast<float>(current_uav_vel_.z()));
+                            if (!Replan(cur_pos_w, cur_vel_w)) {
+                                // Replan failed — hold position
+                                state_ = State::HOLDING;
+                                last_pos_ = cur_pos_w;
+                                post_contingency_cooldown_until_ = t_sec + kPostContingencyCooldown;
+                                post_contingency_replan_attempts_ = 0;
+                                status_label_->SetText("HOLDING (obstacle)");
+                                Warn("safety monitor: replan failed, holding position\n");
+                            } else {
+                                // Replan succeeded — set cooldown to prevent immediate re-triggering
+                                post_contingency_cooldown_until_ = t_sec + kPostContingencyCooldown;
+                                post_contingency_replan_attempts_ = 0;
+                                Info("safety monitor: replan succeeded after contingency, cooldown %.1fs\n",
+                                     kPostContingencyCooldown);
+                            }
+                        } else {
+                            // Max replan attempts exhausted — hold position to break the loop
+                            Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
+                                                static_cast<float>(current_uav_pos_.x()),
+                                                static_cast<float>(current_uav_pos_.z()));
                             state_ = State::HOLDING;
                             last_pos_ = cur_pos_w;
-                            status_label_->SetText("HOLDING (obstacle)");
-                            Warn("safety monitor: replan failed, holding position\n");
+                            post_contingency_cooldown_until_ = t_sec + kPostContingencyCooldown;
+                            post_contingency_replan_attempts_ = 0;
+                            status_label_->SetText("HOLDING (obstacle, max replans)");
+                            Warn("safety monitor: max %d post-contingency replans exhausted, holding position\n",
+                                 kMaxPostContingencyReplans);
                         }
                     }
                 }
                 // While contingency is active, do NOT re-trigger — let it execute
-            } else if (obs_dist < emergency_distance_) {
-                // First trigger: generate contingency and activate it ONCE
+            } else if (obs_dist < emergency_distance_ && t_sec >= post_contingency_cooldown_until_) {
+                // Trigger contingency ONLY if not in post-contingency cooldown
+                // (cooldown prevents the contingency→replan→contingency loop)
                 GenerateContingencyTrajectory(current_uav_pos_, current_uav_vel_, current_uav_acc_);
                 if (contingency_valid_) {
                     gcopter_traj_ = contingency_traj_;
@@ -550,6 +578,8 @@ void TrajectoryManager::StartTraj() {
         state_ = State::EXECUTING;
         last_replan_time_ = 0.0;
         contingency_active_ = false;
+        post_contingency_replan_attempts_ = 0;
+        post_contingency_cooldown_until_ = 0.0;
         status_label_->SetText("EXECUTING");
         Info("trajectory execution started\n");
     }
@@ -559,6 +589,8 @@ void TrajectoryManager::StopTraj() {
     state_ = State::IDLE;
     execution_time_set_ = false;
     contingency_active_ = false;
+    post_contingency_replan_attempts_ = 0;
+    post_contingency_cooldown_until_ = 0.0;
     status_label_->SetText("IDLE (stopped)");
     Info("trajectory stopped\n");
 }
@@ -1447,31 +1479,40 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
     tailPVA.col(2) = Eigen::Vector3d::Zero();
 
     // Parameters for GCOPTER_PolytopeSFC
-    double timeWeight = 500.0;       // rho: penalty on total time
-    double lengthPerPiece = 2.0;     // meters per MINCO piece
+    // Values aligned with the original ZJU GCOPTER global_planning.yaml defaults,
+    // adjusted for our lower velocity limits.  The key insight: GCOPTER uses
+    // penalty methods, not hard constraints.  Penalty weights must be high enough
+    // relative to timeWeight for constraints to be respected.
+    //
+    // Reference: gcopter/config/global_planning.yaml
+    //   WeightT=20, ChiVec=[1e4,1e4,1e4,1e4,1e5], IntegralIntervs=16
+    double timeWeight = 20.0;        // rho: penalty on total time (original default)
+    double lengthPerPiece = 1.0;     // meters per MINCO piece (finer for small workspace)
     double smoothingFactor = 0.01;
-    int integralResolution = 8;
+    int integralResolution = 16;     // quadrature resolution (original default)
 
     // Magnitude bounds: [v_max, omega_max, theta_max, thrust_min, thrust_max]
-    double mass = 1.0;   // kg (nominal quadrotor mass)
+    double mass = 0.61;  // kg (small quadrotor, from original config)
     double grav = 9.81;
-    double thrust_min = mass * grav * 0.2;
-    double thrust_max = mass * grav * 1.8;
-    double omega_max = 6.0;  // rad/s — typical quadrotor max body rate
+    double thrust_min = mass * grav * 0.3;
+    double thrust_max = mass * grav * 2.0;
+    double omega_max = 2.1;  // rad/s (from original config MaxBdrMag)
     Eigen::VectorXd magnitudeBounds(5);
     magnitudeBounds << v_max,           // max velocity (m/s)
                        omega_max,       // max body rate (rad/s)
-                       M_PI / 4.0,      // max tilt angle (45 deg)
+                       1.05,            // max tilt angle (~60 deg, from original config)
                        thrust_min,      // min thrust (N)
                        thrust_max;      // max thrust (N)
 
     // Penalty weights: [position/corridor, velocity, body_rate, tilt_angle, thrust]
+    // All 1e4 except thrust at 1e5 — matching original GCOPTER defaults.
+    // These must dominate timeWeight for constraints to be respected.
     Eigen::VectorXd penaltyWeights(5);
-    penaltyWeights << 10000.0,   // corridor (position) penalty — high to enforce obstacle avoidance
-                      1000.0,    // velocity penalty
-                      100.0,     // body rate penalty
-                      100.0,     // tilt angle penalty
-                      10.0;      // thrust penalty
+    penaltyWeights << 1.0e4,     // corridor (position) penalty
+                      1.0e4,     // velocity penalty
+                      1.0e4,     // body rate penalty
+                      1.0e4,     // tilt angle penalty
+                      1.0e5;     // thrust penalty
 
     // Physical params: [mass, grav, drag_coeff_x, drag_coeff_y, drag_coeff_z, yaw_dot]
     // NOTE: GCOPTER's flatness map assumes z-UP (ENU). Our planner uses NED (z-down).
@@ -1479,7 +1520,7 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
     // maneuvers. For horizontal indoor flight this is negligible. The corridor position
     // constraint and velocity magnitude check are frame-independent.
     Eigen::VectorXd physicalParams(6);
-    physicalParams << mass, grav, 0.0, 0.0, 0.0, 1e-4;
+    physicalParams << mass, grav, 0.70, 0.80, 0.01, 1e-4;  // drag coeffs from original config
 
     // --- Wrap the GCOPTER solve in try-catch ---
     // quickhull / enumerateVs can throw on degenerate geometry even after our
@@ -1495,7 +1536,7 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
             return false;
         }
 
-        cost = solver.optimize(traj, 1.0e-4);
+        cost = solver.optimize(traj, 1.0e-5);  // tighter tolerance (original default)
     } catch (const std::exception &e) {
         Warn("GCOPTER constrained: exception during solve: %s\n", e.what());
         return false;
@@ -1524,10 +1565,29 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
     gcopter_traj_ = traj;
     gcopter_traj_valid_ = true;
 
-    // Post-solve validation using GCOPTER's analytical max-rate computation
+    // Post-solve validation using GCOPTER's analytical max-rate computation.
+    // If constraints are massively violated, reject the trajectory — TOPP-RA
+    // cannot fix extreme violations (it would produce absurd durations).
     {
         double actual_max_vel = gcopter_traj_.getMaxVelRate();
         double actual_max_acc = gcopter_traj_.getMaxAccRate();
+        Info("GCOPTER validation: max_vel=%.2f/%.2f max_acc=%.2f/%.2f\n",
+             actual_max_vel, v_max, actual_max_acc, a_max);
+
+        // Reject if velocity exceeds limit by >3x or accel by >10x
+        // (mild violations are acceptable — TOPP-RA can fix those)
+        if (actual_max_vel > v_max * 3.0) {
+            Warn("GCOPTER constrained: REJECTING trajectory — max velocity %.2f "
+                 "exceeds limit %.2f by >3x\n", actual_max_vel, v_max);
+            gcopter_traj_valid_ = false;
+            return false;
+        }
+        if (actual_max_acc > a_max * 10.0) {
+            Warn("GCOPTER constrained: REJECTING trajectory — max accel %.2f "
+                 "exceeds limit %.2f by >10x\n", actual_max_acc, a_max);
+            gcopter_traj_valid_ = false;
+            return false;
+        }
         if (actual_max_vel > v_max * 1.5) {
             Warn("GCOPTER constrained: max velocity %.2f exceeds limit %.2f by >50%%\n",
                  actual_max_vel, v_max);
@@ -1536,8 +1596,6 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
             Warn("GCOPTER constrained: max accel %.2f exceeds limit %.2f by >100%%\n",
                  actual_max_acc, a_max);
         }
-        Info("GCOPTER validation: max_vel=%.2f/%.2f max_acc=%.2f/%.2f\n",
-             actual_max_vel, v_max, actual_max_acc, a_max);
     }
 
     total_duration_ = traj.getTotalDuration();
@@ -3197,6 +3255,15 @@ bool TrajectoryManager::ApplyTOPPRA() {
 
     Info("TOPP-RA: rescaling %.2f -> %.2f s (ratio=%.2f)\n",
          total_duration_, new_total_time, time_ratio);
+
+    // Sanity check: if TOPP-RA wants to stretch time by >50x, the input
+    // trajectory is far too aggressive.  Reject instead of producing an
+    // absurdly long trajectory that the drone will never finish.
+    if (time_ratio > 50.0 || new_total_time > 300.0) {
+        Warn("TOPP-RA: rescaling ratio %.1f too extreme (max 50x / 300s), rejecting\n",
+             time_ratio);
+        return false;
+    }
 
     int M = num_pieces;
     Eigen::Matrix3d headPVA, tailPVA;
