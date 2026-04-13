@@ -1387,8 +1387,21 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
     if (hPolytopes.empty() || num_waypoints_ < 2) return false;
 
     // --- Pre-validate polytopes before passing to GCOPTER ---
-    // Bad polytopes (too few faces, near-zero normals) cause crashes in
-    // geo_utils::enumerateVs() → quickhull.
+    // GCOPTER's processCorridor() calls geo_utils::enumerateVs() on each
+    // polytope and on every consecutive-pair intersection.  enumerateVs()
+    // runs quickhull which SEGFAULTS (not a C++ exception) on degenerate or
+    // near-degenerate geometry.  We must reject bad inputs *before* they
+    // reach quickhull.
+    //
+    // Validation pipeline (mirrors what setup() + processCorridor() will do):
+    //  1. Basic face-count and normal sanity
+    //  2. Normalize half-planes (same as gcopter.hpp line 747-749)
+    //  3. findInterior on each polytope        → checks non-empty interior
+    //  4. findInterior on each consecutive-pair → checks non-empty intersection
+    //  5. Check that the interior margin (LP objective) is not too shallow
+    //     (shallow means quickhull gets near-degenerate input)
+
+    // Step 1: basic sanity
     for (int pi = 0; pi < static_cast<int>(hPolytopes.size()); ++pi) {
         const Eigen::MatrixX4d &hp = hPolytopes[pi];
         if (hp.rows() < 4) {
@@ -1403,6 +1416,50 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
                      pi, r, nrm);
                 return false;
             }
+        }
+    }
+
+    // Step 2: normalize half-planes exactly as GCOPTER does in setup()
+    std::vector<Eigen::MatrixX4d> normPolys = hPolytopes;
+    for (size_t i = 0; i < normPolys.size(); ++i) {
+        const Eigen::ArrayXd norms = normPolys[i].leftCols<3>().rowwise().norm();
+        normPolys[i].array().colwise() /= norms;
+    }
+
+    // Step 3: each individual polytope must have a valid interior point
+    for (int pi = 0; pi < static_cast<int>(normPolys.size()); ++pi) {
+        Eigen::Vector3d inner;
+        if (!geo_utils::findInterior(normPolys[pi], inner)) {
+            Warn("GCOPTER constrained: polytope %d has no interior point, aborting\n", pi);
+            return false;
+        }
+        // Check that the interior is not too shallow (margin > eps)
+        Eigen::VectorXd slack = -(normPolys[pi].leftCols<3>() * inner + normPolys[pi].rightCols<1>());
+        double min_slack = slack.minCoeff();
+        if (min_slack < 1e-4) {
+            Warn("GCOPTER constrained: polytope %d interior too shallow (margin=%.2e), aborting\n",
+                 pi, min_slack);
+            return false;
+        }
+    }
+
+    // Step 4: each consecutive pair must have a non-degenerate intersection
+    for (int pi = 0; pi < static_cast<int>(normPolys.size()) - 1; ++pi) {
+        Eigen::MatrixX4d combined(normPolys[pi].rows() + normPolys[pi+1].rows(), 4);
+        combined.topRows(normPolys[pi].rows()) = normPolys[pi];
+        combined.bottomRows(normPolys[pi+1].rows()) = normPolys[pi+1];
+        Eigen::Vector3d inner;
+        if (!geo_utils::findInterior(combined, inner)) {
+            Warn("GCOPTER constrained: polytopes %d and %d do not overlap, aborting\n", pi, pi+1);
+            return false;
+        }
+        // Check intersection margin is not too shallow for quickhull
+        Eigen::VectorXd slack = -(combined.leftCols<3>() * inner + combined.rightCols<1>());
+        double min_slack = slack.minCoeff();
+        if (min_slack < 1e-4) {
+            Warn("GCOPTER constrained: polytopes %d/%d intersection too shallow (margin=%.2e), aborting\n",
+                 pi, pi+1, min_slack);
+            return false;
         }
     }
 
@@ -3405,6 +3462,72 @@ bool TrajectoryManager::GenerateCorridors(
     }
 
     Info("GenerateCorridors: %d segments processed\n", n_segs);
+
+    // --- Post-validate: ensure consecutive polytopes overlap ---
+    // GCOPTER's processCorridor() intersects each consecutive pair and runs
+    // quickhull on the result.  If the intersection is empty or nearly
+    // degenerate, quickhull will SEGFAULT.  We check this here using the
+    // safe LP-based findInterior() and replace failing polytopes with
+    // well-conditioned AABB boxes that are guaranteed to overlap.
+    for (int i = 0; i + 1 < static_cast<int>(hPolytopes.size()); ++i) {
+        // Normalize (same as GCOPTER setup)
+        Eigen::MatrixX4d nA = hPolytopes[i];
+        Eigen::MatrixX4d nB = hPolytopes[i+1];
+        {
+            Eigen::ArrayXd na = nA.leftCols<3>().rowwise().norm();
+            nA.array().colwise() /= na;
+            Eigen::ArrayXd nb = nB.leftCols<3>().rowwise().norm();
+            nB.array().colwise() /= nb;
+        }
+        Eigen::MatrixX4d combined(nA.rows() + nB.rows(), 4);
+        combined.topRows(nA.rows()) = nA;
+        combined.bottomRows(nB.rows()) = nB;
+        Eigen::Vector3d inner;
+        bool overlap_ok = geo_utils::findInterior(combined, inner);
+        double margin = 0.0;
+        if (overlap_ok) {
+            Eigen::VectorXd slack = -(combined.leftCols<3>() * inner + combined.rightCols<1>());
+            margin = slack.minCoeff();
+        }
+        if (!overlap_ok || margin < 1e-4) {
+            Warn("GenerateCorridors: polytopes %d/%d have degenerate overlap (ok=%d margin=%.2e), "
+                 "replacing both with AABB\n", i, i+1, overlap_ok, margin);
+            // Replace both polytopes with well-conditioned AABB boxes that
+            // share a generous overlap region around the shared waypoint.
+            // Segment i uses wps[i]→wps[i+1], segment i+1 uses wps[i+1]→wps[i+2]
+            const double fix_margin = 1.5;
+            for (int idx = i; idx <= i + 1 && idx < n_segs; ++idx) {
+                Eigen::Vector3d sA = wps[idx], sB = wps[idx + 1];
+                Eigen::Vector3d lo2, hi2;
+                for (int a = 0; a < 3; ++a) {
+                    lo2(a) = std::min(sA(a), sB(a)) - fix_margin;
+                    hi2(a) = std::max(sA(a), sB(a)) + fix_margin;
+                }
+                lo2.x() = std::max(lo2.x(), WS_X_MIN);
+                lo2.y() = std::max(lo2.y(), WS_Y_MIN);
+                lo2.z() = std::max(lo2.z(), WS_Z_MIN);
+                hi2.x() = std::min(hi2.x(), WS_X_MAX);
+                hi2.y() = std::min(hi2.y(), WS_Y_MAX);
+                hi2.z() = std::min(hi2.z(), WS_Z_MAX);
+                for (int a = 0; a < 3; ++a) {
+                    if (hi2(a) - lo2(a) < 0.4) {
+                        double mid = 0.5 * (lo2(a) + hi2(a));
+                        lo2(a) = mid - 0.2;
+                        hi2(a) = mid + 0.2;
+                    }
+                }
+                Eigen::MatrixX4d fixBox(6, 4);
+                fixBox.row(0) <<  1.0,  0.0,  0.0, -hi2.x();
+                fixBox.row(1) << -1.0,  0.0,  0.0,  lo2.x();
+                fixBox.row(2) <<  0.0,  1.0,  0.0, -hi2.y();
+                fixBox.row(3) <<  0.0, -1.0,  0.0,  lo2.y();
+                fixBox.row(4) <<  0.0,  0.0,  1.0, -hi2.z();
+                fixBox.row(5) <<  0.0,  0.0, -1.0,  lo2.z();
+                hPolytopes[idx] = fixBox;
+            }
+        }
+    }
+
     return true;
 }
 
