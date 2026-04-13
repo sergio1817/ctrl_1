@@ -127,8 +127,8 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       prev_coeffs_valid_(false),
       distance_field_valid_(false),
       safety_monitor_enabled_(true),
-      emergency_distance_(0.3),
-      replan_distance_(0.8),
+      emergency_distance_(0.15),   // actual collision danger — half the obstacle radius
+      replan_distance_(0.25),       // closer than planned safety margin (0.3m) → unexpected
       last_safety_replan_time_(0.0),
       contingency_active_(false),
       contingency_start_time_(0.0),
@@ -417,6 +417,13 @@ void TrajectoryManager::Update(Time time,
             obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
             double obs_dist = GetObstacleDistance(current_uav_pos_);
 
+            // Adaptive thresholds based on safety margin.  The planned trajectory
+            // maintains safety_margin clearance from obstacle surfaces.  Only trigger
+            // the safety monitor when the drone is closer than expected.
+            double sm = safety_margin_->Value();
+            double emergency_dist = std::max(sm * 0.5, 0.10);  // 50% of safety margin (collision danger)
+            double replan_dist    = std::max(sm * 0.8, 0.15);  // 80% of safety margin (unexpected proximity)
+
             // If contingency is active, let it complete before any other action
             if (contingency_active_) {
                 double contingency_elapsed = t_sec - contingency_start_time_;
@@ -432,7 +439,7 @@ void TrajectoryManager::Update(Time time,
                     state_ = State::HOLDING;
                     last_pos_ = cur_pos_w;
                     post_contingency_cooldown_until_ = t_sec + kPostContingencyCooldown;
-                    if (obs_dist >= emergency_distance_) {
+                    if (obs_dist >= emergency_dist) {
                         status_label_->SetText("HOLDING (post-contingency)");
                         Info("safety monitor: contingency completed, obstacle cleared (%.2fm), holding\n", obs_dist);
                     } else {
@@ -441,7 +448,7 @@ void TrajectoryManager::Update(Time time,
                     }
                 }
                 // While contingency is active, do NOT re-trigger — let it execute
-            } else if (obs_dist < emergency_distance_ && t_sec >= post_contingency_cooldown_until_) {
+            } else if (obs_dist < emergency_dist && t_sec >= post_contingency_cooldown_until_) {
                 // Trigger contingency ONLY if not in post-contingency cooldown
                 GenerateContingencyTrajectory(current_uav_pos_, current_uav_vel_, current_uav_acc_);
                 if (contingency_valid_) {
@@ -457,7 +464,7 @@ void TrajectoryManager::Update(Time time,
                     contingency_duration_ = contingency_traj_.getTotalDuration();
                     status_label_->SetText("EMERGENCY STOP");
                     Warn("safety monitor: obstacle at %.2fm < emergency %.2fm, contingency activated\n",
-                         obs_dist, emergency_distance_);
+                         obs_dist, emergency_dist);
                 } else {
                     // Can't even generate contingency — hold immediately
                     Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
@@ -469,12 +476,12 @@ void TrajectoryManager::Update(Time time,
                     status_label_->SetText("HOLDING (emergency)");
                     Warn("safety monitor: obstacle at %.2fm, contingency failed, holding\n", obs_dist);
                 }
-            } else if (obs_dist < replan_distance_ && safety_replan_failures_ < kMaxSafetyReplanFailures) {
+            } else if (obs_dist < replan_dist && safety_replan_failures_ < kMaxSafetyReplanFailures) {
                 // Replan-distance zone: try to replan, but give up after repeated failures
                 if ((t_sec - last_safety_replan_time_) > 1.0) {
                     last_safety_replan_time_ = t_sec;
                     Warn("safety monitor: obstacle at %.2fm < replan threshold %.2fm, replanning (attempt %d/%d)\n",
-                         obs_dist, replan_distance_, safety_replan_failures_ + 1, kMaxSafetyReplanFailures);
+                         obs_dist, replan_dist, safety_replan_failures_ + 1, kMaxSafetyReplanFailures);
                     Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
                                         static_cast<float>(current_uav_pos_.x()),
                                         static_cast<float>(current_uav_pos_.z()));
@@ -494,7 +501,7 @@ void TrajectoryManager::Update(Time time,
                         }
                     }
                 }
-            } else if (obs_dist >= replan_distance_) {
+            } else if (obs_dist >= replan_dist) {
                 // Obstacle is far enough — reset failure counter
                 safety_replan_failures_ = 0;
             }
@@ -3567,15 +3574,29 @@ void TrajectoryManager::ComputeDistanceField() {
 }
 
 double TrajectoryManager::GetObstacleDistance(const Eigen::Vector3d &world_pos) const {
-    if (distance_field_.empty()) return std::numeric_limits<double>::max();
-
-    Eigen::Vector3i gi = WorldToGrid(world_pos);
-    // Out-of-bounds means no obstacle information — assume safe (max distance)
-    // Previously returned 0.0 which falsely triggered emergency contingency
-    if (!GridInBounds(gi.x(), gi.y(), gi.z())) return std::numeric_limits<double>::max();
-
-    int idx = gi.x() * grid_ny_ * grid_nz_ + gi.y() * grid_nz_ + gi.z();
-    return static_cast<double>(distance_field_[idx]);
+    // Compute Euclidean distance to the nearest actual obstacle surface.
+    // We use the real obstacle positions and radii rather than the inflated
+    // occupancy grid.  The grid inflates obstacles by (radius + safety_margin)
+    // for path planning, which would report 0.0 for any point within the
+    // inflated zone — falsely triggering the safety monitor on trajectories
+    // that are correctly avoiding the real obstacle.
+    //
+    // Obstacle positions are stored in planner frame (x/y swapped from world),
+    // and world_pos (current_uav_pos_) is also in planner frame, so we can
+    // compare directly.  We only measure 2D (horizontal) distance since
+    // obstacles are modeled as vertical cylinders.
+    double min_dist = std::numeric_limits<double>::max();
+    for (int i = 0; i < num_obstacles_; ++i) {
+        double dx = world_pos.x() - obstacles_[i].pos.x();
+        double dy = world_pos.y() - obstacles_[i].pos.y();
+        double center_dist = std::sqrt(dx * dx + dy * dy);
+        double surface_dist = center_dist - obstacles_[i].radius;
+        if (surface_dist < min_dist) {
+            min_dist = surface_dist;
+        }
+    }
+    // Clamp to 0 if inside the obstacle
+    return std::max(min_dist, 0.0);
 }
 
 // ============================================================
