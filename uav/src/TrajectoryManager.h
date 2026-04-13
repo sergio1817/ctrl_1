@@ -325,6 +325,8 @@ private:
     double post_contingency_cooldown_until_;  ///< timestamp until which no new contingency is triggered (prevents loop)
     static constexpr int kMaxPostContingencyReplans = 2;  ///< max replans before giving up and holding
     static constexpr double kPostContingencyCooldown = 3.0; ///< seconds to suppress re-triggering after holding
+    int    safety_replan_failures_;           ///< consecutive failed replans via replan_distance path
+    static constexpr int kMaxSafetyReplanFailures = 3; ///< after this many, hold position
 
     // --- Adaptive prediction horizon ---
     double last_update_time_;

@@ -135,6 +135,7 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       contingency_duration_(0.0),
       post_contingency_replan_attempts_(0),
       post_contingency_cooldown_until_(0.0),
+      safety_replan_failures_(0),
       last_update_time_(0.0)
 {
     // --------------------------------------------------------
@@ -416,63 +417,32 @@ void TrajectoryManager::Update(Time time,
             obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
             double obs_dist = GetObstacleDistance(current_uav_pos_);
 
-            // If contingency is active, check if it has completed or obstacle cleared
+            // If contingency is active, let it complete before any other action
             if (contingency_active_) {
                 double contingency_elapsed = t_sec - contingency_start_time_;
                 if (contingency_elapsed >= contingency_duration_) {
-                    // Contingency trajectory completed → transition to HOLDING
+                    // Contingency trajectory completed
                     contingency_active_ = false;
+                    // Always hold position after contingency — do NOT replan.
+                    // Replanning from inside/near the obstacle creates a loop:
+                    //   contingency → replan → new traj approaches obstacle → contingency
+                    Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
+                                        static_cast<float>(current_uav_pos_.x()),
+                                        static_cast<float>(current_uav_pos_.z()));
+                    state_ = State::HOLDING;
+                    last_pos_ = cur_pos_w;
+                    post_contingency_cooldown_until_ = t_sec + kPostContingencyCooldown;
                     if (obs_dist >= emergency_distance_) {
-                        // Obstacle cleared — allow normal replanning
-                        post_contingency_replan_attempts_ = 0;
-                        status_label_->SetText("HOVER (post-contingency)");
-                        Info("safety monitor: contingency completed, obstacle cleared (%.2fm)\n", obs_dist);
+                        status_label_->SetText("HOLDING (post-contingency)");
+                        Info("safety monitor: contingency completed, obstacle cleared (%.2fm), holding\n", obs_dist);
                     } else {
-                        // Still too close — try limited replans, then hold
-                        post_contingency_replan_attempts_++;
-                        if (post_contingency_replan_attempts_ <= kMaxPostContingencyReplans) {
-                            Warn("safety monitor: contingency done, obstacle at %.2fm, replan attempt %d/%d\n",
-                                 obs_dist, post_contingency_replan_attempts_, kMaxPostContingencyReplans);
-                            Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
-                                                static_cast<float>(current_uav_pos_.x()),
-                                                static_cast<float>(current_uav_pos_.z()));
-                            Vector3Df cur_vel_w(static_cast<float>(current_uav_vel_.y()),
-                                                static_cast<float>(current_uav_vel_.x()),
-                                                static_cast<float>(current_uav_vel_.z()));
-                            if (!Replan(cur_pos_w, cur_vel_w)) {
-                                // Replan failed — hold position
-                                state_ = State::HOLDING;
-                                last_pos_ = cur_pos_w;
-                                post_contingency_cooldown_until_ = t_sec + kPostContingencyCooldown;
-                                post_contingency_replan_attempts_ = 0;
-                                status_label_->SetText("HOLDING (obstacle)");
-                                Warn("safety monitor: replan failed, holding position\n");
-                            } else {
-                                // Replan succeeded — set cooldown to prevent immediate re-triggering
-                                post_contingency_cooldown_until_ = t_sec + kPostContingencyCooldown;
-                                post_contingency_replan_attempts_ = 0;
-                                Info("safety monitor: replan succeeded after contingency, cooldown %.1fs\n",
-                                     kPostContingencyCooldown);
-                            }
-                        } else {
-                            // Max replan attempts exhausted — hold position to break the loop
-                            Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
-                                                static_cast<float>(current_uav_pos_.x()),
-                                                static_cast<float>(current_uav_pos_.z()));
-                            state_ = State::HOLDING;
-                            last_pos_ = cur_pos_w;
-                            post_contingency_cooldown_until_ = t_sec + kPostContingencyCooldown;
-                            post_contingency_replan_attempts_ = 0;
-                            status_label_->SetText("HOLDING (obstacle, max replans)");
-                            Warn("safety monitor: max %d post-contingency replans exhausted, holding position\n",
-                                 kMaxPostContingencyReplans);
-                        }
+                        status_label_->SetText("HOLDING (obstacle nearby)");
+                        Warn("safety monitor: contingency done, obstacle still at %.2fm, holding\n", obs_dist);
                     }
                 }
                 // While contingency is active, do NOT re-trigger — let it execute
             } else if (obs_dist < emergency_distance_ && t_sec >= post_contingency_cooldown_until_) {
                 // Trigger contingency ONLY if not in post-contingency cooldown
-                // (cooldown prevents the contingency→replan→contingency loop)
                 GenerateContingencyTrajectory(current_uav_pos_, current_uav_vel_, current_uav_acc_);
                 if (contingency_valid_) {
                     gcopter_traj_ = contingency_traj_;
@@ -480,30 +450,53 @@ void TrajectoryManager::Update(Time time,
                     total_duration_ = contingency_traj_.getTotalDuration();
                     trajectory_valid_ = true;
                     num_segments_ = contingency_traj_.getPieceNum();
-                    // Reset execution timing so the new trajectory starts from t=0
                     execution_start_time_ = t_sec;
                     execution_time_set_ = true;
-                    // Mark contingency as active to prevent re-triggering
                     contingency_active_ = true;
                     contingency_start_time_ = t_sec;
                     contingency_duration_ = contingency_traj_.getTotalDuration();
                     status_label_->SetText("EMERGENCY STOP");
                     Warn("safety monitor: obstacle at %.2fm < emergency %.2fm, contingency activated\n",
                          obs_dist, emergency_distance_);
+                } else {
+                    // Can't even generate contingency — hold immediately
+                    Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
+                                        static_cast<float>(current_uav_pos_.x()),
+                                        static_cast<float>(current_uav_pos_.z()));
+                    state_ = State::HOLDING;
+                    last_pos_ = cur_pos_w;
+                    post_contingency_cooldown_until_ = t_sec + kPostContingencyCooldown;
+                    status_label_->SetText("HOLDING (emergency)");
+                    Warn("safety monitor: obstacle at %.2fm, contingency failed, holding\n", obs_dist);
                 }
-            } else if (obs_dist < replan_distance_) {
+            } else if (obs_dist < replan_distance_ && safety_replan_failures_ < kMaxSafetyReplanFailures) {
+                // Replan-distance zone: try to replan, but give up after repeated failures
                 if ((t_sec - last_safety_replan_time_) > 1.0) {
                     last_safety_replan_time_ = t_sec;
-                    Warn("safety monitor: obstacle at %.2fm < replan threshold %.2fm, replanning\n",
-                         obs_dist, replan_distance_);
+                    Warn("safety monitor: obstacle at %.2fm < replan threshold %.2fm, replanning (attempt %d/%d)\n",
+                         obs_dist, replan_distance_, safety_replan_failures_ + 1, kMaxSafetyReplanFailures);
                     Vector3Df cur_pos_w(static_cast<float>(current_uav_pos_.y()),
                                         static_cast<float>(current_uav_pos_.x()),
                                         static_cast<float>(current_uav_pos_.z()));
                     Vector3Df cur_vel_w(static_cast<float>(current_uav_vel_.y()),
                                         static_cast<float>(current_uav_vel_.x()),
                                         static_cast<float>(current_uav_vel_.z()));
-                    Replan(cur_pos_w, cur_vel_w);
+                    if (Replan(cur_pos_w, cur_vel_w)) {
+                        safety_replan_failures_ = 0;  // success resets counter
+                    } else {
+                        safety_replan_failures_++;
+                        if (safety_replan_failures_ >= kMaxSafetyReplanFailures) {
+                            state_ = State::HOLDING;
+                            last_pos_ = cur_pos_w;
+                            status_label_->SetText("HOLDING (replan failed)");
+                            Warn("safety monitor: %d consecutive replan failures, holding\n",
+                                 kMaxSafetyReplanFailures);
+                        }
+                    }
                 }
+            } else if (obs_dist >= replan_distance_) {
+                // Obstacle is far enough — reset failure counter
+                safety_replan_failures_ = 0;
             }
         }
     } else if (state_ == State::HOLDING) {
@@ -580,6 +573,7 @@ void TrajectoryManager::StartTraj() {
         contingency_active_ = false;
         post_contingency_replan_attempts_ = 0;
         post_contingency_cooldown_until_ = 0.0;
+        safety_replan_failures_ = 0;
         status_label_->SetText("EXECUTING");
         Info("trajectory execution started\n");
     }
@@ -591,6 +585,7 @@ void TrajectoryManager::StopTraj() {
     contingency_active_ = false;
     post_contingency_replan_attempts_ = 0;
     post_contingency_cooldown_until_ = 0.0;
+    safety_replan_failures_ = 0;
     status_label_->SetText("IDLE (stopped)");
     Info("trajectory stopped\n");
 }
@@ -785,23 +780,13 @@ bool TrajectoryManager::Replan(const Vector3Df &current_pos,
         contingency_active_ = false;  // successful replan clears contingency
         status_label_->SetText("EXECUTING (replanned)");
     } else {
-        // Use contingency trajectory if available
-        if (contingency_valid_) {
-            gcopter_traj_ = contingency_traj_;
-            gcopter_traj_valid_ = true;
-            total_duration_ = contingency_traj_.getTotalDuration();
-            trajectory_valid_ = true;
-            num_segments_ = contingency_traj_.getPieceNum();
-            state_ = State::EXECUTING;
-            execution_time_set_ = false;
-            contingency_active_ = false;  // replan's contingency fallback does not loop
-            status_label_->SetText("EXECUTING (contingency)");
-            Warn("replanning failed, using contingency decel-to-hover\n");
-            ok = true;
-        } else {
-            state_ = prev;
-            Warn("replanning failed, continuing with old trajectory\n");
-        }
+        // Replan failed — restore previous state, return false.
+        // The caller (safety monitor) will transition to HOLDING.
+        // Do NOT switch to contingency here — that creates a loop when near
+        // an obstacle (contingency ends near obstacle → replan fails → contingency → ...).
+        state_ = prev;
+        Warn("replanning failed, returning to %s\n",
+             prev == State::EXECUTING ? "EXECUTING" : "previous state");
     }
     return ok;
 }
@@ -2854,14 +2839,14 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
                  static_cast<int>(hPolytopes.size()));
             return true;
         }
-        Warn("GCOPTER constrained failed, trying unconstrained GCOPTER\n");
-        // Fallback: unconstrained GCOPTER (may violate corridors)
-        bool ok2 = SolveGCOPTER();
-        if (ok2) {
-            Warn("using unconstrained GCOPTER — trajectory may pass near obstacles\n");
-            return true;
-        }
-        Warn("GCOPTER with obstacles failed, falling back to corridor min-snap\n");
+        // GCOPTER constrained failed.  Do NOT fall back to unconstrained GCOPTER:
+        // the unconstrained solver ignores obstacle corridors entirely, producing
+        // a trajectory that flies straight through obstacles.  This triggers the
+        // safety monitor, which replans, which also fails constrained, creating
+        // an infinite contingency→replan loop.  Instead, return false so the
+        // caller (Replan / safety monitor) transitions to HOLDING.
+        Warn("GCOPTER constrained failed — not using unconstrained fallback near obstacles\n");
+        return false;
     } else if (use_gcopter_) {
         bool ok = SolveGCOPTER();
         if (ok) return true;
