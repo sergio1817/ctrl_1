@@ -327,6 +327,7 @@ private:
     static constexpr double kPostContingencyCooldown = 3.0; ///< seconds to suppress re-triggering after holding
     int    safety_replan_failures_;           ///< consecutive failed replans via replan_distance path
     static constexpr int kMaxSafetyReplanFailures = 3; ///< after this many, hold position
+    bool   obstacle_aware_trajectory_;       ///< true when current trajectory was planned via obstacle avoidance pipeline
 
     // --- Adaptive prediction horizon ---
     double last_update_time_;

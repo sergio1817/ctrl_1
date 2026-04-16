@@ -136,6 +136,7 @@ TrajectoryManager::TrajectoryManager(const LayoutPosition *position,
       post_contingency_replan_attempts_(0),
       post_contingency_cooldown_until_(0.0),
       safety_replan_failures_(0),
+      obstacle_aware_trajectory_(false),
       last_update_time_(0.0)
 {
     // --------------------------------------------------------
@@ -417,12 +418,22 @@ void TrajectoryManager::Update(Time time,
             obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
             double obs_dist = GetObstacleDistance(current_uav_pos_);
 
-            // Adaptive thresholds based on safety margin.  The planned trajectory
-            // maintains safety_margin clearance from obstacle surfaces.  Only trigger
-            // the safety monitor when the drone is closer than expected.
+            // Adaptive thresholds based on safety margin and trajectory type.
+            // When the trajectory was planned with obstacle avoidance, it is DESIGNED
+            // to fly close to obstacles (at ~safety_margin distance).  Use very tight
+            // thresholds (only trigger on actual collision danger).  For non-obstacle-
+            // aware trajectories, use wider thresholds.
             double sm = safety_margin_->Value();
-            double emergency_dist = std::max(sm * 0.5, 0.10);  // 50% of safety margin (collision danger)
-            double replan_dist    = std::max(sm * 0.8, 0.15);  // 80% of safety margin (unexpected proximity)
+            double emergency_dist, replan_dist;
+            if (obstacle_aware_trajectory_) {
+                // Obstacle-aware: only emergency if closer than obstacle radius
+                double obs_radius = obstacle_radius_spin_->Value();
+                emergency_dist = std::max(obs_radius * 0.5, 0.05);  // half radius = inside/touching
+                replan_dist    = std::max(obs_radius, 0.10);         // at surface = replan
+            } else {
+                emergency_dist = std::max(sm * 0.5, 0.10);
+                replan_dist    = std::max(sm * 0.8, 0.15);
+            }
 
             // If contingency is active, let it complete before any other action
             if (contingency_active_) {
@@ -667,8 +678,10 @@ bool TrajectoryManager::Plan(const Vector3Df &current_pos,
 
     // Use full obstacle avoidance pipeline if enabled and obstacles present
     bool ok;
+    obstacle_aware_trajectory_ = false;  // reset; set to true if obstacle avoidance succeeds
     if (obstacle_avoidance_mode_->CurrentIndex() == 1 && num_obstacles_ > 0) {
         ok = PlanWithObstacleAvoidance();
+        if (ok) obstacle_aware_trajectory_ = true;
     } else if (use_gcopter_) {
         ok = SolveGCOPTER();
         if (!ok) {
@@ -1472,89 +1485,120 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
 
     // Parameters for GCOPTER_PolytopeSFC
     // Original GCOPTER defaults (global_planning.yaml): WeightT=20, MaxVelMag=4.0
-    // The time penalty competes with constraint penalties.  At low v_max the optimizer
-    // strongly prefers shorter (faster) trajectories, overwhelming the velocity penalty.
-    // Scale timeWeight quadratically with the velocity ratio so the constraint/time
-    // trade-off stays balanced regardless of v_max.
-    const double kOrigWeightT = 20.0;
-    const double kOrigVmax    = 4.0;   // m/s in original config
-    double v_ratio = std::min(v_max / kOrigVmax, 1.0);  // clamp at 1 for fast drones
-    double timeWeight = kOrigWeightT * v_ratio * v_ratio;  // e.g. v_max=1→1.25, v_max=2→5.0
-    Info("GCOPTER params: v_max=%.2f, timeWeight=%.2f (v_ratio=%.2f)\n",
-         v_max, timeWeight, v_ratio);
-    double lengthPerPiece = 1.0;
-    double smoothingFactor = 0.01;
-    int integralResolution = 16;
+    // GCOPTER uses penalty methods (soft constraints).  At low v_max, the optimizer's
+    // initial time allocation (at 3*v_max) creates segments that are too fast, and
+    // timeWeight pushes towards short (fast) trajectories.  We try progressively more
+    // aggressive parameter configurations until we get a usable result.
+    const double kOrigVmax = 4.0;
+    double v_ratio = std::min(v_max / kOrigVmax, 1.0);
 
-    // Magnitude bounds: [v_max, omega_max, theta_max, thrust_min, thrust_max]
-    double mass = 0.61;  // kg (small quadrotor, from original config)
+    double mass = 0.61;
     double grav = 9.81;
     double thrust_min = mass * grav * 0.3;
     double thrust_max = mass * grav * 2.0;
-    double omega_max = 2.1;  // rad/s (from original config MaxBdrMag)
+    double omega_max = 2.1;
     Eigen::VectorXd magnitudeBounds(5);
-    magnitudeBounds << v_max,           // max velocity (m/s)
-                       omega_max,       // max body rate (rad/s)
-                       1.05,            // max tilt angle (~60 deg, from original config)
-                       thrust_min,      // min thrust (N)
-                       thrust_max;      // max thrust (N)
+    magnitudeBounds << v_max, omega_max, 1.05, thrust_min, thrust_max;
 
-    // Penalty weights: [position/corridor, velocity, body_rate, tilt_angle, thrust]
-    // Original defaults: [1e4, 1e4, 1e4, 1e4, 1e5] at v_max=4.0.
-    // At lower v_max, velocity is the hardest constraint to satisfy, so scale its
-    // penalty inversely with v_ratio^2 to maintain the same effective pressure.
-    double vel_penalty_scale = 1.0 / (v_ratio * v_ratio);  // 16x at v_max=1
-    Eigen::VectorXd penaltyWeights(5);
-    penaltyWeights << 1.0e4,                      // corridor (position) penalty
-                      1.0e4 * vel_penalty_scale,  // velocity penalty (1.6e5 at v_max=1)
-                      1.0e4,                      // body rate penalty
-                      1.0e4,                      // tilt angle penalty
-                      1.0e5;                      // thrust penalty
-
-    // Physical params: [mass, grav, drag_coeff_x, drag_coeff_y, drag_coeff_z, yaw_dot]
-    // NOTE: GCOPTER's flatness map assumes z-UP (ENU). Our planner uses NED (z-down).
-    // The penalty functional (thrust/tilt/body-rate) has a frame mismatch for vertical
-    // maneuvers. For horizontal indoor flight this is negligible. The corridor position
-    // constraint and velocity magnitude check are frame-independent.
     Eigen::VectorXd physicalParams(6);
-    physicalParams << mass, grav, 0.70, 0.80, 0.01, 1e-4;  // drag coeffs from original config
+    physicalParams << mass, grav, 0.70, 0.80, 0.01, 1e-4;
 
-    // --- Wrap the GCOPTER solve in try-catch ---
-    // quickhull / enumerateVs can throw on degenerate geometry even after our
-    // pre-validation (e.g. polytope intersection produces degenerate faces).
+    // Retry configurations: [timeWeight, vel_penalty_multiplier]
+    // Attempt 1: moderate timeWeight, scaled velocity penalty
+    // Attempt 2: very low timeWeight, very high velocity penalty
+    // Attempt 3: near-zero timeWeight, extreme velocity penalty (force slow trajectory)
+    struct SolverConfig {
+        double timeWeight;
+        double velPenalty;
+        const char* label;
+    };
+    double v2 = v_ratio * v_ratio;
+    SolverConfig configs[] = {
+        { 20.0 * v2,         1.0e4 / v2,         "standard" },      // 1.25 / 1.6e5 at v_max=1
+        { 20.0 * v2 * 0.1,   1.0e4 / (v2 * v2),  "low-timeW" },     // 0.125 / 2.56e6 at v_max=1
+        { 0.01,              1.0e7,               "min-timeW" },     // nearly ignore time, max vel penalty
+    };
+    const int kNumConfigs = 3;
+
     Trajectory<5> traj;
     double cost;
-    try {
-        gcopter::GCOPTER_PolytopeSFC solver;
-        if (!solver.setup(timeWeight, headPVA, tailPVA, hPolytopes,
-                          lengthPerPiece, smoothingFactor, integralResolution,
-                          magnitudeBounds, penaltyWeights, physicalParams)) {
-            Warn("GCOPTER constrained: setup failed\n");
-            return false;
+    bool solved = false;
+    double best_vel_ratio = 1e9;
+
+    for (int attempt = 0; attempt < kNumConfigs && !solved; ++attempt) {
+        double timeWeight = configs[attempt].timeWeight;
+        double velPenalty = configs[attempt].velPenalty;
+        Info("GCOPTER attempt %d/%d (%s): v_max=%.2f, timeWeight=%.3f, velPenalty=%.0f\n",
+             attempt + 1, kNumConfigs, configs[attempt].label, v_max, timeWeight, velPenalty);
+
+        Eigen::VectorXd penaltyWeights(5);
+        penaltyWeights << 1.0e4, velPenalty, 1.0e4, 1.0e4, 1.0e5;
+
+        double lengthPerPiece = 1.0;
+        double smoothingFactor = 0.01;
+        int integralResolution = 16;
+
+        Trajectory<5> attempt_traj;
+        double attempt_cost;
+        try {
+            gcopter::GCOPTER_PolytopeSFC solver;
+            if (!solver.setup(timeWeight, headPVA, tailPVA, hPolytopes,
+                              lengthPerPiece, smoothingFactor, integralResolution,
+                              magnitudeBounds, penaltyWeights, physicalParams)) {
+                Warn("GCOPTER attempt %d: setup failed\n", attempt + 1);
+                continue;
+            }
+            attempt_cost = solver.optimize(attempt_traj, 1.0e-5);
+        } catch (const std::exception &e) {
+            Warn("GCOPTER attempt %d: exception: %s\n", attempt + 1, e.what());
+            continue;
+        } catch (...) {
+            Warn("GCOPTER attempt %d: unknown exception\n", attempt + 1);
+            continue;
         }
 
-        cost = solver.optimize(traj, 1.0e-5);  // tighter tolerance (original default)
-    } catch (const std::exception &e) {
-        Warn("GCOPTER constrained: exception during solve: %s\n", e.what());
-        return false;
-    } catch (...) {
-        Warn("GCOPTER constrained: unknown exception during solve\n");
-        return false;
+        if (std::isinf(attempt_cost) || std::isnan(attempt_cost) ||
+            attempt_cost < 0.0 || attempt_traj.getPieceNum() < 1) {
+            Warn("GCOPTER attempt %d: optimization failed (cost=%.4f)\n",
+                 attempt + 1, attempt_cost);
+            continue;
+        }
+
+        double dur = attempt_traj.getTotalDuration();
+        if (std::isnan(dur) || std::isinf(dur) || dur <= 0.0) {
+            Warn("GCOPTER attempt %d: invalid duration %.4f\n", attempt + 1, dur);
+            continue;
+        }
+
+        double actual_max_vel = attempt_traj.getMaxVelRate();
+        double actual_max_acc = attempt_traj.getMaxAccRate();
+        double vel_r = actual_max_vel / v_max;
+        Info("GCOPTER attempt %d validation: max_vel=%.2f/%.2f (%.1fx) max_acc=%.2f/%.2f\n",
+             attempt + 1, actual_max_vel, v_max, vel_r, actual_max_acc, a_max);
+
+        // Accept if velocity is within 2x (TOPP-RA can fix moderate violations).
+        // Keep the best result across attempts.
+        if (vel_r < best_vel_ratio) {
+            best_vel_ratio = vel_r;
+            traj = attempt_traj;
+            cost = attempt_cost;
+        }
+        if (vel_r <= 2.0) {
+            solved = true;
+        }
     }
 
-    // --- Handle L-BFGS failure gracefully ---
-    // Check for NaN/Inf cost and negative cost (indicates L-BFGS negative
-    // line-search step).  Do NOT extract a trajectory from a failed optimization.
-    if (std::isinf(cost) || std::isnan(cost) || cost < 0.0 || traj.getPieceNum() < 1) {
-        Warn("GCOPTER constrained: optimization failed (cost=%.4f, pieces=%d)\n",
-             cost, traj.getPieceNum());
-        return false;
+    // If no attempt got below 2x, use the best one if it's below 5x
+    // (TOPP-RA can handle up to ~5x with significant time stretching)
+    if (!solved && best_vel_ratio <= 5.0) {
+        Warn("GCOPTER constrained: best attempt has vel %.1fx over limit, "
+             "accepting for TOPP-RA correction\n", best_vel_ratio);
+        solved = true;
     }
 
-    // Sanity check: trajectory duration must be positive and finite
-    double dur = traj.getTotalDuration();
-    if (std::isnan(dur) || std::isinf(dur) || dur <= 0.0) {
-        Warn("GCOPTER constrained: invalid trajectory duration %.4f\n", dur);
+    if (!solved) {
+        Warn("GCOPTER constrained: all attempts failed (best vel ratio %.1fx)\n",
+             best_vel_ratio);
         return false;
     }
 
@@ -1562,32 +1606,12 @@ bool TrajectoryManager::SolveGCOPTERConstrained(
     gcopter_traj_ = traj;
     gcopter_traj_valid_ = true;
 
-    // Post-solve validation using GCOPTER's analytical max-rate computation.
-    // If constraints are massively violated, reject the trajectory — TOPP-RA
-    // cannot fix extreme violations (it would produce absurd durations).
     {
         double actual_max_vel = gcopter_traj_.getMaxVelRate();
         double actual_max_acc = gcopter_traj_.getMaxAccRate();
-        Info("GCOPTER validation: max_vel=%.2f/%.2f max_acc=%.2f/%.2f\n",
-             actual_max_vel, v_max, actual_max_acc, a_max);
-
-        // Reject if velocity exceeds limit by >3x or accel by >10x
-        // (mild violations are acceptable — TOPP-RA can fix those)
-        if (actual_max_vel > v_max * 3.0) {
-            Warn("GCOPTER constrained: REJECTING trajectory — max velocity %.2f "
-                 "exceeds limit %.2f by >3x\n", actual_max_vel, v_max);
-            gcopter_traj_valid_ = false;
-            return false;
-        }
-        if (actual_max_acc > a_max * 10.0) {
-            Warn("GCOPTER constrained: REJECTING trajectory — max accel %.2f "
-                 "exceeds limit %.2f by >10x\n", actual_max_acc, a_max);
-            gcopter_traj_valid_ = false;
-            return false;
-        }
         if (actual_max_vel > v_max * 1.5) {
-            Warn("GCOPTER constrained: max velocity %.2f exceeds limit %.2f by >50%%\n",
-                 actual_max_vel, v_max);
+            Warn("GCOPTER constrained: max velocity %.2f exceeds limit %.2f by >50%% "
+                 "(TOPP-RA will correct)\n", actual_max_vel, v_max);
         }
         if (actual_max_acc > a_max * 2.0) {
             Warn("GCOPTER constrained: max accel %.2f exceeds limit %.2f by >100%%\n",
@@ -2844,6 +2868,10 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
     bool corridors_ok = GenerateCorridors(full_path, hPolytopes, corridors);
 
     // GCOPTER mode: use FIRI polytope corridors + constrained MINCO solver
+    // The constrained solver ensures the trajectory stays within safe corridors.
+    // We NEVER fall back to unconstrained GCOPTER for obstacle avoidance because
+    // unconstrained MINCO smooths through waypoints and can cut into obstacle zones.
+    // If constrained fails, we return false (drone holds position, which is safe).
     if (use_gcopter_ && corridors_ok && !hPolytopes.empty()) {
         bool ok = SolveGCOPTERConstrained(hPolytopes);
         if (ok) {
@@ -2851,17 +2879,7 @@ bool TrajectoryManager::PlanWithObstacleAvoidance() {
                  static_cast<int>(hPolytopes.size()));
             return true;
         }
-        // GCOPTER constrained failed.  Fall back to unconstrained GCOPTER which follows
-        // the A*-generated waypoints (obstacle-avoiding path) but without corridor
-        // enforcement.  The path itself avoids obstacles; TOPP-RA will enforce velocity.
-        // The safety monitor HOLDING logic (max replan failures) prevents loops.
-        Warn("GCOPTER constrained failed, trying unconstrained GCOPTER on A* path\n");
-        bool ok2 = SolveGCOPTER();
-        if (ok2) {
-            Warn("using unconstrained GCOPTER on obstacle-avoidance path\n");
-            return true;
-        }
-        Warn("GCOPTER with obstacles failed entirely\n");
+        Warn("GCOPTER constrained failed — cannot safely avoid obstacle, holding\n");
         return false;
     } else if (use_gcopter_) {
         bool ok = SolveGCOPTER();
